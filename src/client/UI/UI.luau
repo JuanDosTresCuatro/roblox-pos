@@ -295,6 +295,8 @@ function UI.modal(parent: Instance, props: { [string]: any })
 		Name = "Modal",
 		Text = "",
 		AutoButtonColor = false,
+		-- Frees the mouse in first person so the dialog can be clicked.
+		Modal = true,
 		BackgroundColor3 = C.Backdrop,
 		BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1),

@@ -44,6 +44,9 @@ local screens: { [string]: Screen } = {}
 local tabButtons: { [string]: TextButton } = {}
 local active: string? = nil
 local isOpen = false
+-- Roblox locks the mouse to the centre of the screen in first person. A visible GuiButton with
+-- Modal = true frees it, so the cursor can reach the window while it is open.
+local mouseUnlock: TextButton
 
 local function money(n: number): string
 	return Format.money(n, Config.Currency.Symbol)
@@ -124,6 +127,7 @@ function App.open()
 		return
 	end
 	isOpen = true
+	mouseUnlock.Visible = true
 	window.Visible = true
 	window.GroupTransparency = 1
 	windowScale.Scale = 0.94
@@ -137,6 +141,7 @@ function App.close()
 		return
 	end
 	isOpen = false
+	mouseUnlock.Visible = false
 	UI.tween(window, { GroupTransparency = 1 })
 	UI.tween(windowScale, { Scale = 0.96 })
 	task.delay(0.2, function()
@@ -309,6 +314,16 @@ function App.mount()
 		Position = UDim2.fromOffset(0, 120),
 		Size = UDim2.new(1, 0, 1, -120),
 		Parent = window,
+	})
+
+	mouseUnlock = UI.new("TextButton", {
+		Name = "MouseUnlock",
+		Text = "",
+		Modal = true,
+		Visible = false,
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(0, 0),
+		Parent = root,
 	})
 
 	overlay = UI.new("Frame", {
