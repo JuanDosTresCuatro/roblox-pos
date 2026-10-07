@@ -39,7 +39,12 @@ jobs:
         run: |
           cp studio/RoPOS.rbxlx "$RUNNER_TEMP/RoPOS.rbxlx"
           cp simulator/index.html "$RUNNER_TEMP/RoPOS-Simulator.html"
-          gh release create "$GITHUB_REF_NAME" \
-            RoPOS-Studio.zip "$RUNNER_TEMP/RoPOS.rbxlx" "$RUNNER_TEMP/RoPOS-Simulator.html" \
-            --title "RoPOS $GITHUB_REF_NAME" \
-            --notes-file packaging/RELEASE_NOTES.md
+          files=(RoPOS-Studio.zip "$RUNNER_TEMP/RoPOS.rbxlx" "$RUNNER_TEMP/RoPOS-Simulator.html")
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            # The tag was moved: replace the downloads on the existing release.
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+              --title "RoPOS $GITHUB_REF_NAME" \
+              --notes-file packaging/RELEASE_NOTES.md
+          fi
