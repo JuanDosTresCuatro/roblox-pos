@@ -85,11 +85,17 @@ function Receipt.saleLines(sale): { Line }
 		{ text = sale.registerName, align = "center" },
 		rule(),
 		row("Receipt", sale.receipt),
-		row("Date", Format.dateTime(sale.t)),
-		row("Cashier", sale.cashier.name),
-		row("Customer", sale.customer.name),
-		rule(),
 	}
+	if sale.orderNumber then
+		table.insert(lines, { text = Format.row("ORDER", "#" .. sale.orderNumber, WIDTH), bold = true })
+	end
+	if sale.dining then
+		table.insert(lines, row("Dining", sale.dining))
+	end
+	table.insert(lines, row("Date", Format.dateTime(sale.t)))
+	table.insert(lines, row(if sale.source == "Kiosk" then "Kiosk" else "Cashier", sale.cashier.name))
+	table.insert(lines, row("Customer", sale.customer.name))
+	table.insert(lines, rule())
 	for _, line in sale.lines do
 		table.insert(lines, row(string.format("%d x %s", line.qty, line.name), money(line.unitPrice * line.qty)))
 	end

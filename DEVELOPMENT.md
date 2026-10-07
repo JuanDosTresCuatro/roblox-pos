@@ -64,17 +64,20 @@ roblox-pos/
 │   │   ├── Validate.luau     Remote input checks
 │   │   ├── Aggregate.luau    Report totals that merge across servers
 │   │   ├── Format.luau       Money, dates, receipt rows
+│   │   ├── Palette.luau      Colours shared by the POS window, kiosks and world screens
 │   │   ├── Roles.luau, Signal.luau, Net.luau
 │   ├── server/               ServerScriptService.POSServer
 │   │   ├── init.server.luau  Start-up order
 │   │   ├── Handlers.luau     Every client action and the role it needs
 │   │   └── Services/         Store, Api, Staff, Wallet, Catalogue, Checkout,
-│   │                         Registers, Shifts, Sales, Reports, Audit, Demo
+│   │                         Registers, Kiosks, Orders, Boards, Surface,
+│   │                         Shifts, Sales, Reports, Audit, Demo
 │   └── client/               StarterPlayerScripts.POSClient
 │       ├── App.luau          Window, header, tabs, screen scaling
 │       ├── PaymentPrompt.luau, Receipt.luau, Api.luau, State.luau
 │       ├── UI/               Theme tokens, UI kit, toasts
-│       └── Screens/          Sell, Sales, Shift, Products, Reports, Audit
+│       ├── World/            Kiosk touchscreen and kitchen display (drawn on parts)
+│       └── Screens/          Sell, Orders, Sales, Shift, Products, Reports, Audit
 ├── tests/
 │   ├── Specs.luau            Unit specs for the pure modules (Luau CLI and Studio)
 │   ├── simulate.luau         End-to-end run of the server code on 2 fake servers (Lune)
@@ -87,14 +90,14 @@ roblox-pos/
 
 ## Test without Roblox
 
-`tests/simulate.luau` runs the **real** RoPOS server code, every module unchanged, on 2 simulated game servers that share one set of DataStores. Fake players walk up to the counter, ring up orders, pay, decline, get refunds and change servers. 101 checks cover permissions, malformed requests, payments, timeouts, a price changing mid-payment, stock sold on 2 servers at once, a refund to a player who left, 2 managers refunding the same sale at the same moment, reports, rate limiting and a DataStore outage.
+`tests/simulate.luau` runs the **real** RoPOS server code, every module unchanged, on 2 simulated game servers that share one set of DataStores. Fake players walk up to the counter and the kiosks, ring up orders, pay, decline, get refunds and change servers. 130 checks cover permissions, malformed requests, payments, timeouts, a price changing mid-payment, stock sold on 2 servers at once, a refund to a player who left, 2 managers refunding the same sale at the same moment, kiosk ordering and occupancy, order numbers, the kitchen Ready and Collected flow, the order and menu boards, reports, rate limiting and a DataStore outage.
 
 ```sh
 rokit install          # once: installs lune and the other tools from rokit.toml
 lune run tests/simulate
 ```
 
-It ends with `RoPOS simulation: 101 passed, 0 failed`. The fake engine (`tests/sim/Engine.luau`) is stricter than Roblox in one useful way: it fails on anything a RemoteEvent or DataStore would refuse, such as a mixed table or a Color3 saved to a DataStore.
+It ends with `RoPOS simulation: 130 passed, 0 failed`. The fake engine (`tests/sim/Engine.luau`) is stricter than Roblox in one useful way: it fails on anything a RemoteEvent or DataStore would refuse, such as a mixed table or a Color3 saved to a DataStore.
 
 ## Tools
 
@@ -153,3 +156,8 @@ Run this in a **Local Server** test with 2 players (Test > Clients and Servers),
 | 10 | Shift tab, Close shift | Z report shows 1 sale and 1 refund, net 0 |
 | 11 | Open the till again, then walk more than 20 studs (about 5.6 m) away | Window closes, register screen shows "Closed" |
 | 12 | Reports and Audit log tabs | The sale, refund and shift actions are listed |
+| 13 | Player 2 taps **Touch to start** on a kiosk, picks Eat in, adds items and pays | Player 2 gets an order number. It shows under Preparing on the board and as a ticket on the kitchen display |
+| 14 | Player 1 taps the kiosk while Player 2 is using it | It says "Someone is ordering" |
+| 15 | Player 1 taps **Ready** on the ticket | The number moves to Ready, Player 2 gets "Order N is ready to collect!" |
+| 16 | Player 1 taps **Collected** | The number leaves the board |
+| 17 | Manager changes a Snacks price on the Products tab | The Snacks menu board shows the new price |

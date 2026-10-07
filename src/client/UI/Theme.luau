@@ -2,32 +2,8 @@
 
 local Theme = {}
 
-local rgb = Color3.fromRGB
-
-Theme.Colors = {
-	Backdrop = rgb(5, 6, 9),
-	Bg = rgb(13, 15, 20),
-	Panel = rgb(20, 23, 31),
-	Raised = rgb(28, 32, 43),
-	RaisedHover = rgb(36, 41, 55),
-	Border = rgb(44, 50, 66),
-	Text = rgb(236, 239, 245),
-	Muted = rgb(146, 153, 170),
-	Faint = rgb(98, 105, 124),
-	Accent = rgb(92, 132, 255),
-	AccentHover = rgb(118, 152, 255),
-	AccentSoft = rgb(34, 44, 78),
-	Success = rgb(46, 204, 113),
-	SuccessHover = rgb(76, 220, 138),
-	SuccessSoft = rgb(22, 58, 41),
-	Warning = rgb(242, 173, 61),
-	WarningSoft = rgb(66, 50, 22),
-	Danger = rgb(235, 87, 87),
-	DangerHover = rgb(245, 115, 115),
-	DangerSoft = rgb(70, 28, 32),
-	Paper = rgb(250, 248, 242),
-	Ink = rgb(28, 28, 32),
-}
+-- Colours come from the shared palette so the POS window, kiosks and world screens match.
+Theme.Colors = require(game:GetService("ReplicatedStorage"):WaitForChild("POS"):WaitForChild("Palette"))
 
 local family = "rbxasset://fonts/families/BuilderSans.json"
 local mono = "rbxasset://fonts/families/RobotoMono.json"

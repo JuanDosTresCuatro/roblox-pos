@@ -18,6 +18,8 @@ local Sales = require(Services.Sales)
 local Demo = require(Services.Demo)
 local Registers = require(Services.Registers)
 local Checkout = require(Services.Checkout)
+local Kiosks = require(Services.Kiosks)
+local Boards = require(Services.Boards)
 
 Store.init()
 Staff.init()
@@ -29,6 +31,8 @@ Sales.init()
 Demo.setup()
 Registers.init()
 Checkout.init()
+Kiosks.init()
+Boards.init()
 require(script.Handlers)
 -- Remotes appear last, so a client never calls an action before its handler exists.
 Api.init(Staff.roleOf)
@@ -36,8 +40,9 @@ Store.start()
 
 print(
 	string.format(
-		"[RoPOS] Ready. %d register(s). Data %s.",
+		"[RoPOS] Ready. %d register(s), %d kiosk(s). Data %s.",
 		#Registers.all(),
+		#Kiosks.all(),
 		if Store.persistent then "saved to DataStores" else "in memory only"
 	)
 )
@@ -59,6 +64,8 @@ local Api = require(Services.Api)
 local Audit = require(Services.Audit)
 local Catalogue = require(Services.Catalogue)
 local Checkout = require(Services.Checkout)
+local Kiosks = require(Services.Kiosks)
+local Orders = require(Services.Orders)
 local Registers = require(Services.Registers)
 local Reports = require(Services.Reports)
 local Sales = require(Services.Sales)
@@ -99,7 +106,8 @@ Api.handle("session.hello", Customer, function(player)
 		roleName = Roles.name(role),
 		maxDiscount = Staff.maxDiscount(player),
 		persistent = Store.persistent,
-		catalogue = if role >= Cashier then Catalogue.list() else nil,
+		catalogue = Catalogue.list(),
+		orders = Orders.list(),
 		register = if register then Registers.summary(register) else nil,
 	}
 end)
@@ -129,7 +137,14 @@ Api.handle("register.preview", Cashier, function(player, rawCart, rawDiscount)
 			for _, line in cart do
 				items += line.qty
 			end
-			register.preview = { items = items, total = totals.total }
+			local lines = {}
+			for _, line in totals.lines do
+				table.insert(
+					lines,
+					{ name = line.name or line.productId, qty = line.qty, total = line.unitPrice * line.qty }
+				)
+			end
+			register.preview = { items = items, total = totals.total, discount = totals.discount, lines = lines }
 		end
 	end
 	Registers.updateDisplay(register)
@@ -198,8 +213,8 @@ end)
 
 -- Checkout -------------------------------------------------------------------------------
 
-Api.handle("checkout.start", Cashier, function(player, cart, discount, customerId)
-	return Checkout.start(player, myRegister(player), cart, discount, customerId)
+Api.handle("checkout.start", Cashier, function(player, cart, discount, customerId, dining)
+	return Checkout.start(player, myRegister(player), cart, discount, customerId, dining)
 end)
 
 Api.handle("checkout.cancel", Cashier, function(player, orderId)
@@ -252,6 +267,7 @@ Api.handle("sales.refund", Manager, function(player, receipt, restock)
 		end
 	end
 	Reports.recordRefund(sale, os.time())
+	Orders.cancelReceipt(sale.receipt)
 	local register = Registers.of(player)
 	if register and register.shift then
 		Shifts.recordRefund(register.shift, sale)
@@ -322,10 +338,56 @@ Api.handle("audit.recent", Manager, function(_player, limit)
 	return Audit.recent(Validate.int(limit, 1, 500) or 100)
 end)
 
--- Keep every staff screen in step with the catalogue.
+-- Kiosks (customers) ---------------------------------------------------------------------
+
+Api.handle("kiosk.start", Customer, function(player, id)
+	return Kiosks.start(player, id)
+end)
+
+Api.handle("kiosk.ping", Customer, function(player, id)
+	Kiosks.ping(player, id)
+end)
+
+Api.handle("kiosk.cancel", Customer, function(player, id)
+	Kiosks.cancel(player, id)
+end)
+
+Api.handle("kiosk.checkout", Customer, function(player, id, cart, dining, expectedTotal)
+	return Kiosks.checkout(player, id, cart, dining, expectedTotal)
+end)
+
+-- Orders (kitchen display and the Orders tab) --------------------------------------------
+
+local function orderNumber(raw: any): number
+	local number = Validate.int(raw, 1, 999)
+	if not number then
+		Api.fail("Invalid order number")
+	end
+	return number
+end
+
+local function orderAction(fn: (number, Player) -> (boolean, string?))
+	return function(player, raw)
+		local ok, problem = fn(orderNumber(raw), player)
+		if not ok then
+			Api.fail(problem or "That order is not on the board")
+		end
+	end
+end
+
+Api.handle("orders.list", Customer, function()
+	return Orders.list()
+end)
+Api.handle("orders.ready", Cashier, orderAction(Orders.markReady))
+Api.handle("orders.recall", Cashier, orderAction(Orders.recall))
+Api.handle("orders.collect", Cashier, orderAction(Orders.collect))
+
+-- Keep every screen in step with the catalogue. Menus, kiosks and tills all show it.
 Catalogue.changed:Connect(function()
 	local snapshot = Catalogue.list()
-	Api.pushWhere(Staff.isStaff, "Catalogue", snapshot)
+	Api.pushWhere(function()
+		return true
+	end, "Catalogue", snapshot)
 end)
 
 return {}
@@ -543,6 +605,241 @@ return Audit
       </Item>
       <Item class="ModuleScript" referent="5">
         <Properties>
+          <string name="Name">Boards</string>
+          <string name="Source"><![CDATA[-- Screens everyone sees the same way, drawn by the server:
+--   POSOrderBoard  "Preparing" and "Ready" order numbers
+--   POSMenuBoard   menu with live prices and sold-out marks. Attribute Category = one category.
+-- Tag a Part (or a Model with a Part named "Screen"); the front face is drawn on.
+
+local CollectionService = game:GetService("CollectionService")
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Config = require(Shared.Config)
+local Format = require(Shared.Format)
+local Palette = require(Shared.Palette)
+local Catalogue = require(script.Parent.Catalogue)
+local Orders = require(script.Parent.Orders)
+local Surface = require(script.Parent.Surface)
+
+local Boards = {}
+
+local F = Surface.Fonts
+local GUI_NAME = "RoPOSBoard"
+
+local function screenOf(instance: Instance): BasePart?
+	local screen = instance:FindFirstChild("Screen", true)
+	if screen and screen:IsA("BasePart") then
+		return screen
+	end
+	return if instance:IsA("BasePart") then instance else nil
+end
+
+------------------------------------------------------------------------ order board
+
+local function drawOrderBoard(part: BasePart)
+	local _, root, size = Surface.create(part, GUI_NAME)
+	local unit = size.Y / 100 -- 1% of the board height
+	local header = 16 * unit
+
+	local preparing, ready = {}, {}
+	for _, ticket in Orders.list() do
+		table.insert(if ticket.status == "ready" then ready else preparing, ticket.number)
+	end
+
+	local function column(x: number, title: string, fill: Color3, ink: Color3, numbers: { number }, big: boolean)
+		local col = Surface.box(root, {
+			Position = UDim2.new(x, 2 * unit, 0, 2 * unit),
+			Size = UDim2.new(0.5, -3 * unit, 1, -4 * unit),
+			BackgroundColor3 = Palette.Raised,
+			Radius = math.floor(3 * unit),
+		})
+		local bar = Surface.box(
+			col,
+			{ Size = UDim2.new(1, 0, 0, header), BackgroundColor3 = fill, Radius = math.floor(3 * unit) }
+		)
+		Surface.text(bar, {
+			Text = title,
+			TextColor3 = ink,
+			FontFace = F.Heavy,
+			TextSize = 9 * unit,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Size = UDim2.fromScale(1, 1),
+		})
+		local grid = Surface.new("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(3 * unit, header + 3 * unit),
+			Size = UDim2.new(1, -6 * unit, 1, -(header + 6 * unit)),
+			Parent = col,
+		})
+		Surface.new("UIGridLayout", {
+			CellSize = UDim2.new(1 / 3, -2 * unit, 0, 16 * unit),
+			CellPadding = UDim2.fromOffset(2 * unit, 2 * unit),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Parent = grid,
+		})
+		for index, number in numbers do
+			if index > 12 then
+				break
+			end
+			Surface.text(grid, {
+				Text = tostring(number),
+				LayoutOrder = index,
+				FontFace = F.Heavy,
+				TextSize = (if big then 14 else 12) * unit,
+				TextColor3 = if big then Palette.Success else Palette.Text,
+				TextXAlignment = Enum.TextXAlignment.Center,
+			})
+		end
+	end
+
+	column(0, "Preparing", Palette.Accent, Palette.OnAccent, preparing, false)
+	column(0.5, "Ready", Palette.Success, Palette.OnSuccess, ready, true)
+end
+
+------------------------------------------------------------------------ menu board
+
+local function drawMenuBoard(part: BasePart, category: string?)
+	local _, root, size = Surface.create(part, GUI_NAME)
+	local unit = size.Y / 100
+
+	local products = {}
+	for _, product in Catalogue.list() do
+		if product.active and (not category or product.category == category) then
+			table.insert(products, product)
+		end
+	end
+
+	Surface.text(root, {
+		Text = category or Config.Store.Name,
+		FontFace = F.Heavy,
+		TextSize = 13 * unit,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Position = UDim2.fromOffset(0, 3 * unit),
+		Size = UDim2.new(1, 0, 0, 15 * unit),
+	})
+	Surface.box(root, {
+		BackgroundColor3 = Palette.Accent,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 19 * unit),
+		Size = UDim2.fromOffset(22 * unit, 1.4 * unit),
+		Radius = math.floor(unit),
+	})
+
+	local columns = if #products <= 4 then #products elseif #products <= 8 then 4 else 5
+	local rows = math.max(1, math.ceil(#products / math.max(columns, 1)))
+	local grid = Surface.new("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(4 * unit, 25 * unit),
+		Size = UDim2.new(1, -8 * unit, 1, -29 * unit),
+		Parent = root,
+	})
+	Surface.new("UIGridLayout", {
+		CellSize = UDim2.new(1 / math.max(columns, 1), -3 * unit, 1 / rows, -3 * unit),
+		CellPadding = UDim2.fromOffset(3 * unit, 3 * unit),
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = grid,
+	})
+	for index, product in products do
+		local soldOut = product.stock ~= nil and product.stock <= 0
+		local tile = Surface.new("Frame", { BackgroundTransparency = 1, LayoutOrder = index, Parent = grid })
+		local swatch = Surface.box(tile, {
+			BackgroundColor3 = product.colour,
+			BackgroundTransparency = if soldOut then 0.6 else 0,
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.fromScale(0.5, 0),
+			Size = UDim2.fromScale(0.42, 0.42),
+		})
+		Surface.new("UIAspectRatioConstraint", { AspectRatio = 1, Parent = swatch })
+		Surface.new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = swatch })
+		Surface.text(swatch, {
+			Text = string.upper(string.sub(product.name, 1, 1)),
+			FontFace = F.Heavy,
+			TextScaled = true,
+			TextColor3 = Color3.new(1, 1, 1),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Size = UDim2.fromScale(1, 1),
+		})
+		Surface.text(tile, {
+			Text = product.name,
+			FontFace = F.Bold,
+			TextSize = 5.2 * unit,
+			TextColor3 = if soldOut then Palette.Faint else Palette.Text,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Position = UDim2.fromScale(0, 0.47),
+			Size = UDim2.fromScale(1, 0.24),
+		})
+		Surface.text(tile, {
+			Text = if soldOut then "Sold out" else Format.money(product.price, Config.Currency.Symbol),
+			FontFace = F.Heavy,
+			TextSize = 6 * unit,
+			TextColor3 = if soldOut then Palette.Danger else Palette.AccentText,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Position = UDim2.fromScale(0, 0.72),
+			Size = UDim2.fromScale(1, 0.24),
+		})
+	end
+end
+
+------------------------------------------------------------------------ wiring
+
+local orderBoards: { BasePart } = {}
+local menuBoards: { { part: BasePart, category: string? } } = {}
+
+local function redrawOrders()
+	for _, part in orderBoards do
+		drawOrderBoard(part)
+	end
+end
+
+local function redrawMenus()
+	for _, board in menuBoards do
+		drawMenuBoard(board.part, board.category)
+	end
+end
+
+local function watch(tag: string, onAdd: (Instance, BasePart) -> ())
+	local function add(instance: Instance)
+		local part = screenOf(instance)
+		if part then
+			onAdd(instance, part)
+		else
+			warn("[RoPOS] " .. instance:GetFullName() .. " is tagged " .. tag .. " but has no Screen part")
+		end
+	end
+	for _, instance in CollectionService:GetTagged(tag) do
+		add(instance)
+	end
+	CollectionService:GetInstanceAddedSignal(tag):Connect(add)
+end
+
+function Boards.init()
+	watch(Config.Tags.OrderBoard, function(_, part)
+		table.insert(orderBoards, part)
+		drawOrderBoard(part)
+	end)
+	watch(Config.Tags.MenuBoard, function(instance, part)
+		local category = instance:GetAttribute("Category")
+		local board =
+			{ part = part, category = if typeof(category) == "string" and category ~= "" then category else nil }
+		table.insert(menuBoards, board)
+		drawMenuBoard(board.part, board.category)
+	end)
+	Orders.changed:Connect(redrawOrders)
+	Catalogue.changed:Connect(redrawMenus)
+end
+
+-- For tests: the numbers currently on an order board.
+function Boards.orderBoards(): { BasePart }
+	return orderBoards
+end
+
+return Boards
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="6">
+        <Properties>
           <string name="Name">Catalogue</string>
           <string name="Source"><![CDATA[-- Products: fixed details come from Config.Products; price, active flag and stock are saved.
 --
@@ -748,7 +1045,7 @@ return Catalogue
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="6">
+      <Item class="ModuleScript" referent="7">
         <Properties>
           <string name="Name">Checkout</string>
           <string name="Source"><![CDATA[-- The payment handshake.
@@ -777,6 +1074,7 @@ local Sales = require(script.Parent.Sales)
 local Shifts = require(script.Parent.Shifts)
 local Staff = require(script.Parent.Staff)
 local Wallet = require(script.Parent.Wallet)
+local Orders = require(script.Parent.Orders)
 
 local Checkout = {}
 
@@ -788,6 +1086,7 @@ export type Order = {
 	cart: { Validate.CartLine },
 	discountPct: number,
 	totals: Pricing.Totals,
+	dining: string?,
 	status: "pending" | "paid" | "declined" | "expired" | "cancelled",
 	expiresAt: number,
 }
@@ -870,7 +1169,22 @@ local function finish(order: Order, status, reason: string)
 	Registers.updateDisplay(order.register)
 end
 
-function Checkout.start(player: Player, register: Registers.Register, rawCart: any, rawDiscount: any, rawCustomer: any)
+-- Returns the dining option if it is one of Config.Orders.DiningOptions, or nil.
+function Checkout.dining(raw: any): string?
+	if typeof(raw) == "string" and table.find(Config.Orders.DiningOptions, raw) then
+		return raw
+	end
+	return nil
+end
+
+function Checkout.start(
+	player: Player,
+	register: Registers.Register,
+	rawCart: any,
+	rawDiscount: any,
+	rawCustomer: any,
+	rawDining: any
+)
 	if not register.shift then
 		Api.fail("Open a shift before taking payments")
 	end
@@ -917,6 +1231,7 @@ function Checkout.start(player: Player, register: Registers.Register, rawCart: a
 		customer = customer,
 		cart = cart,
 		discountPct = discountPct,
+		dining = Checkout.dining(rawDining),
 		totals = totals,
 		status = "pending",
 		expiresAt = os.clock() + timeout,
@@ -980,25 +1295,71 @@ function Checkout.respond(customer: Player, orderId: any, accept: any)
 		Api.fail("Prices or stock changed. The cashier needs to ring this up again.")
 	end
 
-	-- From here to the end of the stock loop nothing yields, so the debit and stock are atomic.
-	if not Wallet.tryDebit(customer, order.totals.total) then
-		Api.fail("You don't have enough " .. Config.Currency.StatName)
-	end
-	order.status = "paid"
-	detach(order)
-	for _, line in order.totals.lines do
-		Catalogue.adjustStock(line.productId, -line.qty)
-	end
-
 	local register = order.register
 	local operator = order.operator
-	local commission = math.floor(order.totals.total * Config.Payouts.CashierCommissionPct / 100)
+	local sale = Checkout.complete({
+		customer = customer,
+		totals = order.totals,
+		discountPct = order.discountPct,
+		registerId = register.id,
+		registerName = register.name,
+		shift = register.shift,
+		cashier = { userId = operator.UserId, name = operator.DisplayName },
+		actor = operator,
+		dining = order.dining,
+		source = "Counter",
+		onPaid = function()
+			order.status = "paid"
+			detach(order)
+			Registers.flashPaid(register)
+		end,
+	})
+	if not sale then
+		Api.fail("You don't have enough " .. Config.Currency.StatName)
+	end
+	Registers.flashPaid(register, sale.orderNumber)
+
+	local commission = math.floor(sale.total * Config.Payouts.CashierCommissionPct / 100)
 	if commission > 0 and operator ~= customer and operator.Parent then
 		Wallet.credit(operator, commission)
 	end
 
+	Api.push(operator, "OrderUpdate", { orderId = order.id, status = "paid", sale = sale })
+	Registers.refreshOperator(register)
+	return { status = "paid", receipt = sale.receipt, orderNumber = sale.orderNumber }
+end
+
+export type CompleteArgs = {
+	customer: Player,
+	totals: Pricing.Totals,
+	discountPct: number,
+	registerId: string,
+	registerName: string,
+	shift: Shifts.Shift?,
+	cashier: { userId: number, name: string },
+	actor: Player | string, -- who the audit log names
+	dining: string?,
+	source: string, -- "Counter" or "Kiosk"
+	onPaid: (() -> ())?, -- runs straight after the debit, before anything yields
+}
+
+-- Takes the money and the stock, then records the sale, gives the items and creates the order
+-- ticket. Nothing yields between the balance check and the stock change, so two payments can
+-- never spend the same money or the last item. Returns nil if the customer cannot pay.
+function Checkout.complete(args: CompleteArgs): Sales.Sale?
+	local customer, totals = args.customer, args.totals
+	if not Wallet.tryDebit(customer, totals.total) then
+		return nil
+	end
+	for _, line in totals.lines do
+		Catalogue.adjustStock(line.productId, -line.qty)
+	end
+	if args.onPaid then
+		args.onPaid()
+	end
+
 	local saleLines = {}
-	for _, line in order.totals.lines do
+	for _, line in totals.lines do
 		table.insert(saleLines, {
 			productId = line.productId,
 			name = line.name or line.productId,
@@ -1012,39 +1373,43 @@ function Checkout.respond(customer: Player, orderId: any, accept: any)
 	local sale: Sales.Sale = {
 		receipt = "",
 		t = os.time(),
-		registerId = register.id,
-		registerName = register.name,
-		shiftId = if register.shift then register.shift.id else nil,
-		cashier = { userId = operator.UserId, name = operator.DisplayName },
+		registerId = args.registerId,
+		registerName = args.registerName,
+		shiftId = if args.shift then args.shift.id else nil,
+		cashier = args.cashier,
 		customer = { userId = customer.UserId, name = customer.DisplayName },
 		lines = saleLines,
-		discountPct = order.discountPct,
-		subtotal = order.totals.subtotal,
-		discount = order.totals.discount,
-		tax = order.totals.tax,
-		total = order.totals.total,
+		discountPct = args.discountPct,
+		subtotal = totals.subtotal,
+		discount = totals.discount,
+		tax = totals.tax,
+		total = totals.total,
 		refunded = nil,
+		source = args.source,
+		dining = args.dining,
+		orderNumber = Orders.nextNumber(),
 	}
-	if register.shift then
-		Shifts.recordSale(register.shift, sale)
+	if args.shift then
+		Shifts.recordSale(args.shift, sale)
 	end
-	giveItems(customer, order.totals.lines)
-	Registers.flashPaid(register)
+	giveItems(customer, totals.lines)
 
 	Sales.record(sale) -- yields for the receipt number
-	if order.discountPct > 0 then
+	Orders.add(sale)
+	if args.discountPct > 0 then
 		Audit.log(
-			operator,
+			args.actor,
 			"discount",
-			string.format("%s: %d%% (%s off)", sale.receipt, order.discountPct, money(sale.discount))
+			string.format("%s: %d%% (%s off)", sale.receipt, args.discountPct, money(sale.discount))
 		)
 	end
-	Audit.log(operator, "sale", string.format("%s: %s to %s", sale.receipt, money(sale.total), customer.Name))
-
-	Api.push(operator, "OrderUpdate", { orderId = order.id, status = "paid", sale = sale })
+	Audit.log(
+		args.actor,
+		"sale",
+		string.format("%s: %s to %s (%s)", sale.receipt, money(sale.total), customer.Name, args.source)
+	)
 	Api.push(customer, "Receipt", sale)
-	Registers.refreshOperator(register)
-	return { status = "paid", receipt = sale.receipt }
+	return sale
 end
 
 function Checkout.init()
@@ -1065,25 +1430,38 @@ return Checkout
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="7">
+      <Item class="ModuleScript" referent="8">
         <Properties>
           <string name="Name">Demo</string>
-          <string name="Source"><![CDATA[-- Builds a shop counter with a register when the place has none, and simple item Tools for
+          <string name="Source"><![CDATA[-- Builds a demo restaurant when the place has no register: a wall of screens (order status
+-- board, kitchen display, a big "Your order" screen, menu boards), a counter with a POS
+-- terminal, and a black and a white self-order kiosk. Also creates simple item Tools for
 -- products that have no Tool in ServerStorage.POSItems. Turn both off in Config.Demo.
+--
+-- Layout, seen from the customers' side (+Z), all screens facing the customers:
+--
+--   [ Order board ][                ][            ][ Tools     ]
+--   [ Kitchen     ][   Your order   ][   Gear     ][ Cosmetics ]
+--   [ Snacks      ][                ][            ]
+--                     [ counter + till ]              (kiosk) (kiosk)
 
 local CollectionService = game:GetService("CollectionService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
 local Config = require(Shared.Config)
+local Palette = require(Shared.Palette)
 
 local Demo = {}
+
+local FRONT = Vector3.new(0, 0, 1) -- the direction the customers look from
 
 local function part(parent: Instance, props: { [string]: any }): Part
 	local p = Instance.new("Part")
 	p.Anchored = true
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Material = Enum.Material.SmoothPlastic
 	for key, value in props do
 		(p :: any)[key] = value
 	end
@@ -1091,126 +1469,258 @@ local function part(parent: Instance, props: { [string]: any }): Part
 	return p
 end
 
+-- A part whose front face looks along `facing`.
+local function facingCFrame(position: Vector3, facing: Vector3): CFrame
+	return CFrame.lookAt(position, position + facing)
+end
+
 local function groundY(x: number, z: number): number
 	local result = workspace:Raycast(Vector3.new(x, 500, z), Vector3.new(0, -1000, 0))
 	return if result then result.Position.Y else 0
 end
 
-local function sign(parent: Instance, text: string, cframe: CFrame)
-	local board = part(parent, {
-		Name = "Sign",
-		Size = Vector3.new(8, 1.6, 0.3),
-		CFrame = cframe,
-		Color = Color3.fromRGB(22, 25, 33),
-		Material = Enum.Material.SmoothPlastic,
-		CanCollide = false,
-	})
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 60
-	gui.LightInfluence = 0
-	gui.Brightness = 2
-	local textLabel = Instance.new("TextLabel")
-	textLabel.Size = UDim2.fromScale(1, 1)
-	textLabel.BackgroundTransparency = 1
-	textLabel.Text = text
-	textLabel.TextScaled = true
-	textLabel.TextColor3 = Color3.fromRGB(255, 214, 153)
-	textLabel.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold)
-	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0.18, 0)
-	padding.PaddingBottom = UDim.new(0.18, 0)
-	padding.Parent = textLabel
-	textLabel.Parent = gui
-	gui.Parent = board
+local function tag(instance: Instance, name: string, attributes: { [string]: any }?)
+	for key, value in (attributes or {}) :: { [string]: any } do
+		instance:SetAttribute(key, value)
+	end
+	CollectionService:AddTag(instance, name)
 end
 
-function Demo.buildCounter()
-	local origin = Vector3.new(0, 0, -26)
-	local y = groundY(origin.X, origin.Z)
-	-- Customers stand on the +Z side, staff behind the counter on the -Z side.
-	local base = CFrame.new(origin.X, y, origin.Z)
+-- A flat panel screen: a dark bezel with a "Screen" part on its front. Returns the model.
+local function wallScreen(parent: Instance, name: string, centre: Vector3, width: number, height: number): Model
+	local model = Instance.new("Model")
+	model.Name = name
+	local bezel = part(model, {
+		Name = "Bezel",
+		Size = Vector3.new(width, height, 0.4),
+		CFrame = facingCFrame(centre, FRONT),
+		Color = Palette.Bezel,
+	})
+	part(model, {
+		Name = "Screen",
+		Size = Vector3.new(width - 0.36, height - 0.36, 0.05),
+		CFrame = bezel.CFrame * CFrame.new(0, 0, -0.23),
+		Color = Palette.Panel,
+		CanCollide = false,
+	})
+	model.PrimaryPart = bezel
+	model.Parent = parent
+	return model
+end
 
+local function buildRoom(world: Instance, base: CFrame)
+	part(world, {
+		Name = "Floor",
+		Size = Vector3.new(70, 0.2, 44),
+		CFrame = base * CFrame.new(0, 0.1, 4),
+		Color = Color3.fromRGB(238, 238, 234),
+		Material = Enum.Material.Plastic,
+	})
+	part(world, {
+		Name = "BackWall",
+		Size = Vector3.new(70, 24, 1),
+		CFrame = base * CFrame.new(0, 12, -12.5),
+		Color = Color3.fromRGB(232, 233, 236),
+	})
+	part(world, {
+		Name = "Skirting",
+		Size = Vector3.new(70, 0.6, 0.2),
+		CFrame = base * CFrame.new(0, 0.5, -11.9),
+		Color = Palette.Steel,
+	})
+end
+
+local function buildScreens(world: Instance, base: CFrame, register: Model)
+	local z = -11.7
+	local board = wallScreen(world, "Order Board", (base * CFrame.new(-23, 18.6, z)).Position, 12, 6.4)
+	tag(board, Config.Tags.OrderBoard)
+
+	local kitchen = wallScreen(world, "Kitchen Display", (base * CFrame.new(-23, 11.6, z)).Position, 12, 6.4)
+	tag(kitchen, Config.Tags.Kitchen)
+
+	local snacks = wallScreen(world, "Menu Snacks", (base * CFrame.new(-23, 4.6, z)).Position, 12, 6.4)
+	tag(snacks, Config.Tags.MenuBoard, { Category = "Snacks" })
+
+	-- The till's customer screen is the big wall display, so it belongs to the register model.
+	local yourOrder = wallScreen(register, "Your Order", (base * CFrame.new(-6, 11.6, z)).Position, 15, 13.6)
+	yourOrder.Bezel.Name = "YourOrderBezel"
+	yourOrder.Screen.Parent = register
+
+	local gear = wallScreen(world, "Menu Gear", (base * CFrame.new(10.5, 11.6, z)).Position, 13, 13.6)
+	tag(gear, Config.Tags.MenuBoard, { Category = "Gear" })
+
+	local tools = wallScreen(world, "Menu Tools", (base * CFrame.new(25.5, 15.3, z)).Position, 11, 6.2)
+	tag(tools, Config.Tags.MenuBoard, { Category = "Tools" })
+	local cosmetics = wallScreen(world, "Menu Cosmetics", (base * CFrame.new(25.5, 8.4, z)).Position, 11, 6.2)
+	tag(cosmetics, Config.Tags.MenuBoard, { Category = "Cosmetics" })
+end
+
+-- The counter with a POS terminal facing the staff and a card reader facing the customer.
+local function buildCounter(base: CFrame): Model
 	local model = Instance.new("Model")
 	model.Name = "RoPOS Counter"
+	local at = base * CFrame.new(-6, 0, -1)
 
 	part(model, {
 		Name = "Counter",
 		Size = Vector3.new(16, 3.6, 3),
-		CFrame = base * CFrame.new(0, 1.8, 0),
-		Color = Color3.fromRGB(110, 76, 52),
-		Material = Enum.Material.WoodPlanks,
+		CFrame = at * CFrame.new(0, 1.8, 0),
+		Color = Palette.WhiteBody,
 	})
 	part(model, {
 		Name = "Top",
-		Size = Vector3.new(16.6, 0.3, 3.6),
-		CFrame = base * CFrame.new(0, 3.75, 0),
-		Color = Color3.fromRGB(235, 232, 226),
-		Material = Enum.Material.Marble,
+		Size = Vector3.new(16.4, 0.25, 3.4),
+		CFrame = at * CFrame.new(0, 3.72, 0),
+		Color = Palette.Steel,
 	})
+	part(model, {
+		Name = "Kick",
+		Size = Vector3.new(16, 0.5, 0.2),
+		CFrame = at * CFrame.new(0, 0.25, 1.55),
+		Color = Palette.Accent,
+		Material = Enum.Material.Neon,
+	})
+
 	local till = part(model, {
 		Name = "Till",
-		Size = Vector3.new(2.4, 0.7, 1.8),
-		CFrame = base * CFrame.new(-3, 4.25, -0.2),
-		Color = Color3.fromRGB(30, 34, 45),
-		Material = Enum.Material.SmoothPlastic,
+		Size = Vector3.new(1.8, 0.2, 1.4),
+		CFrame = at * CFrame.new(0, 3.95, -0.3),
+		Color = Palette.Bezel,
 	})
 	part(model, {
-		Name = "Stand",
-		Size = Vector3.new(0.3, 1.1, 0.3),
-		CFrame = base * CFrame.new(-3, 5.15, -0.3),
-		Color = Color3.fromRGB(45, 50, 64),
-		Material = Enum.Material.Metal,
+		Name = "Neck",
+		Size = Vector3.new(0.25, 1.1, 0.25),
+		CFrame = at * CFrame.new(0, 4.6, -0.3),
+		Color = Palette.Steel,
 	})
-	-- Tilted towards the customer. A part's front face points along its LookVector.
-	local screenPos = (base * CFrame.new(-3, 6.2, -0.15)).Position
+	-- Terminal screen, tilted back towards the staff.
+	local terminalPos = (at * CFrame.new(0, 5.6, -0.45)).Position
+	local terminal = part(model, {
+		Name = "Terminal",
+		Size = Vector3.new(2.6, 1.7, 0.18),
+		CFrame = CFrame.lookAt(terminalPos, terminalPos + Vector3.new(0, 0.35, -1)),
+		Color = Palette.Bezel,
+	})
 	part(model, {
-		Name = "Screen",
-		Size = Vector3.new(2.6, 1.6, 0.15),
-		CFrame = CFrame.lookAt(screenPos, screenPos + Vector3.new(0, 0.25, 1)),
-		Color = Color3.fromRGB(10, 10, 12),
-		Material = Enum.Material.Glass,
+		Name = "TerminalGlass",
+		Size = Vector3.new(2.4, 1.5, 0.02),
+		CFrame = terminal.CFrame * CFrame.new(0, 0, -0.1),
+		Color = Palette.Panel,
+		Material = Enum.Material.Neon,
+		Transparency = 0.15,
+		CanCollide = false,
 	})
 	part(model, {
 		Name = "CardReader",
-		Size = Vector3.new(0.6, 0.15, 0.9),
-		CFrame = base * CFrame.new(-1.2, 3.98, 0.9) * CFrame.Angles(math.rad(-15), 0, 0),
-		Color = Color3.fromRGB(45, 50, 64),
-		Material = Enum.Material.SmoothPlastic,
+		Size = Vector3.new(0.6, 0.14, 0.9),
+		CFrame = at * CFrame.new(1.6, 3.92, 1.05) * CFrame.Angles(math.rad(-15), 0, 0),
+		Color = Palette.Bezel,
 	})
 	part(model, {
-		Name = "TipJar",
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(1.1, 0.8, 0.8),
-		CFrame = base * CFrame.new(1.5, 4.45, 0.8) * CFrame.Angles(0, 0, math.rad(90)),
-		Color = Color3.fromRGB(200, 230, 255),
-		Material = Enum.Material.Glass,
-		Transparency = 0.4,
-	})
-
-	-- A menu board above the counter, readable from the customer side.
-	sign(model, "BLOX MART  🛒", base * CFrame.new(0, 9.5, 0) * CFrame.Angles(0, math.pi, 0))
-	part(model, {
-		Name = "SignPost",
-		Size = Vector3.new(0.3, 5.5, 0.3),
-		CFrame = base * CFrame.new(-7.5, 6.5, 0),
-		Color = Color3.fromRGB(45, 50, 64),
-		Material = Enum.Material.Metal,
-	})
-	part(model, {
-		Name = "SignPost",
-		Size = Vector3.new(0.3, 5.5, 0.3),
-		CFrame = base * CFrame.new(7.5, 6.5, 0),
-		Color = Color3.fromRGB(45, 50, 64),
-		Material = Enum.Material.Metal,
+		Name = "ReceiptPrinter",
+		Size = Vector3.new(0.9, 0.6, 0.9),
+		CFrame = at * CFrame.new(-1.7, 4.15, -0.4),
+		Color = Palette.WhiteBody,
 	})
 
 	model.PrimaryPart = till
 	model:SetAttribute("RegisterId", "R1")
 	model:SetAttribute("RegisterName", "Front Counter")
-	model.Parent = workspace
-	CollectionService:AddTag(model, Config.RegisterTag)
+	return model
+end
+
+-- A standing self-order kiosk with a portrait touchscreen, card reader and receipt slot.
+local function buildKiosk(world: Instance, base: CFrame, x: number, id: string, white: boolean)
+	local model = Instance.new("Model")
+	model.Name = "Kiosk " .. id
+	local at = base * CFrame.new(x, 0, 3)
+	local body = if white then Palette.WhiteBody else Palette.Bezel
+	local trim = if white then Palette.Steel else Color3.fromRGB(46, 48, 56)
+
+	part(model, {
+		Name = "Base",
+		Size = Vector3.new(3.4, 0.3, 2.6),
+		CFrame = at * CFrame.new(0, 0.15, 0),
+		Color = trim,
+	})
+	if white then
+		part(model, {
+			Name = "Pedestal",
+			Size = Vector3.new(2.6, 2.7, 0.9),
+			CFrame = at * CFrame.new(0, 1.65, -0.1),
+			Color = body,
+		})
+	else
+		part(model, {
+			Name = "Pole",
+			Size = Vector3.new(0.55, 2.7, 0.55),
+			CFrame = at * CFrame.new(0, 1.65, -0.1),
+			Color = trim,
+		})
+	end
+	local housing = part(model, {
+		Name = "Housing",
+		Size = Vector3.new(3.6, 6.2, 0.7),
+		CFrame = facingCFrame((at * CFrame.new(0, 6.1, -0.1)).Position, FRONT),
+		Color = body,
+	})
+	part(model, {
+		Name = "Bezel",
+		Size = Vector3.new(3.3, 4.7, 0.06),
+		CFrame = housing.CFrame * CFrame.new(0, 0.6, -0.37),
+		Color = Palette.Bezel,
+		CanCollide = false,
+	})
+	part(model, {
+		Name = "Screen",
+		Size = Vector3.new(3.1, 4.5, 0.04),
+		CFrame = housing.CFrame * CFrame.new(0, 0.6, -0.41),
+		Color = Palette.Panel,
+		CanCollide = false,
+	})
+	part(model, {
+		Name = "CardReader",
+		Size = Vector3.new(0.8, 1, 0.3),
+		CFrame = housing.CFrame * CFrame.new(0.9, -2.3, -0.45),
+		Color = trim,
+	})
+	part(model, {
+		Name = "CardLight",
+		Size = Vector3.new(0.5, 0.08, 0.05),
+		CFrame = housing.CFrame * CFrame.new(0.9, -1.95, -0.62),
+		Color = Palette.Success,
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+	})
+	part(model, {
+		Name = "ReceiptSlot",
+		Size = Vector3.new(1.2, 0.08, 0.05),
+		CFrame = housing.CFrame * CFrame.new(-0.7, -2.25, -0.37),
+		Color = Palette.Accent,
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+	})
+	model.PrimaryPart = housing
+	model.Parent = world
+	tag(model, Config.Tags.Kiosk, { KioskId = id, KioskName = "Kiosk " .. string.sub(id, 2) })
+end
+
+function Demo.buildRestaurant()
+	local origin = Vector3.new(0, 0, -30)
+	local base = CFrame.new(origin.X, groundY(origin.X, origin.Z), origin.Z)
+
+	local world = Instance.new("Folder")
+	world.Name = "RoPOS Demo"
+	world.Parent = workspace
+
+	buildRoom(world, base)
+	local register = buildCounter(base)
+	buildScreens(world, base, register)
+	register.Parent = world
+	tag(register, Config.Tags.Register)
+
+	buildKiosk(world, base, 19, "K1", false)
+	buildKiosk(world, base, 25, "K2", true)
 end
 
 local function buildTool(name: string, colour: Color3): Tool
@@ -1245,8 +1755,8 @@ function Demo.ensureItems()
 end
 
 function Demo.setup()
-	if Config.Demo.SpawnRegister and #CollectionService:GetTagged(Config.RegisterTag) == 0 then
-		Demo.buildCounter()
+	if Config.Demo.SpawnRegister and #CollectionService:GetTagged(Config.Tags.Register) == 0 then
+		Demo.buildRestaurant()
 	end
 	if Config.Demo.CreateItemTools then
 		Demo.ensureItems()
@@ -1257,7 +1767,432 @@ return Demo
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="8">
+      <Item class="ModuleScript" referent="9">
+        <Properties>
+          <string name="Name">Kiosks</string>
+          <string name="Source"><![CDATA[-- Self-order kiosks. Tag a Model or Part "POSKiosk"; a Part named "Screen" inside it becomes
+-- the touchscreen (the client draws it). One customer at a time: the server records who is
+-- using each kiosk in the "Occupant" attribute, so every client can show "In use".
+--
+-- Optional attributes on the tagged instance: KioskId (string), KioskName (string).
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Config = require(Shared.Config)
+local Validate = require(Shared.Validate)
+local Api = require(script.Parent.Api)
+local Catalogue = require(script.Parent.Catalogue)
+local Checkout = require(script.Parent.Checkout)
+local Wallet = require(script.Parent.Wallet)
+
+local Kiosks = {}
+
+export type Kiosk = {
+	id: string,
+	name: string,
+	instance: Instance,
+	screen: BasePart,
+	occupant: Player?,
+	lastActive: number,
+}
+
+local kiosks: { [string]: Kiosk } = {}
+local byInstance: { [Instance]: Kiosk } = {}
+local count = 0
+
+local function setOccupant(kiosk: Kiosk, player: Player?)
+	kiosk.occupant = player
+	kiosk.lastActive = os.clock()
+	kiosk.instance:SetAttribute("Occupant", if player then player.UserId else 0)
+end
+
+local function distance(kiosk: Kiosk, player: Player): number
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return math.huge
+	end
+	return (root.Position - kiosk.screen.Position).Magnitude
+end
+
+local function get(id: any): Kiosk
+	local kiosk = typeof(id) == "string" and kiosks[id]
+	if not kiosk then
+		Api.fail("Kiosk not found")
+	end
+	return kiosk
+end
+
+local function mine(player: Player, id: any): Kiosk
+	local kiosk = get(id)
+	if kiosk.occupant ~= player then
+		Api.fail("This kiosk has been reset. Tap the screen to start again.")
+	end
+	kiosk.lastActive = os.clock()
+	return kiosk
+end
+
+function Kiosks.release(kiosk: Kiosk, reason: string?)
+	local player = kiosk.occupant
+	if not player then
+		return
+	end
+	setOccupant(kiosk, nil)
+	if reason then
+		Api.push(player, "KioskClosed", { id = kiosk.id, reason = reason })
+	end
+end
+
+function Kiosks.start(player: Player, id: any)
+	if not Config.Kiosk.Enabled then
+		Api.fail("Kiosks are switched off")
+	end
+	local kiosk = get(id)
+	if distance(kiosk, player) > Config.Kiosk.Range then
+		Api.fail("Step closer to the kiosk")
+	end
+	if kiosk.occupant and kiosk.occupant ~= player and kiosk.occupant.Parent then
+		Api.fail("Someone else is using this kiosk")
+	end
+	for _, other in kiosks do
+		if other ~= kiosk and other.occupant == player then
+			Kiosks.release(other, nil)
+		end
+	end
+	setOccupant(kiosk, player)
+	return {
+		id = kiosk.id,
+		name = kiosk.name,
+		catalogue = Catalogue.list(),
+		balance = Wallet.balance(player),
+	}
+end
+
+function Kiosks.ping(player: Player, id: any)
+	mine(player, id)
+end
+
+function Kiosks.cancel(player: Player, id: any)
+	local kiosk = get(id)
+	if kiosk.occupant == player then
+		Kiosks.release(kiosk, nil)
+	end
+end
+
+function Kiosks.checkout(player: Player, id: any, rawCart: any, rawDining: any, rawExpected: any)
+	local kiosk = mine(player, id)
+	if distance(kiosk, player) > Config.Kiosk.Range + 4 then
+		Api.fail("Step closer to the kiosk")
+	end
+	local cart, problem = Validate.cart(rawCart, Config.Checkout.MaxLines, Config.Checkout.MaxQty)
+	if not cart then
+		Api.fail(problem or "Invalid order")
+	end
+	local dining = Checkout.dining(rawDining)
+	if #Config.Orders.DiningOptions > 0 and not dining then
+		Api.fail("Choose where you would like to eat")
+	end
+	local totals = Checkout.price(cart, 0)
+	-- The screen showed a total; never charge a different one.
+	if typeof(rawExpected) == "number" and rawExpected ~= totals.total then
+		Api.fail("Prices have changed. Check your order and try again.")
+	end
+	local sale = Checkout.complete({
+		customer = player,
+		totals = totals,
+		discountPct = 0,
+		registerId = kiosk.id,
+		registerName = kiosk.name,
+		shift = nil,
+		cashier = { userId = 0, name = kiosk.name },
+		actor = kiosk.name,
+		dining = dining,
+		source = "Kiosk",
+		onPaid = function()
+			setOccupant(kiosk, nil)
+		end,
+	})
+	if not sale then
+		Api.fail("You don't have enough " .. Config.Currency.StatName)
+	end
+	return sale
+end
+
+local function findScreen(instance: Instance): BasePart?
+	local screen = instance:FindFirstChild("Screen", true)
+	if screen and screen:IsA("BasePart") then
+		return screen
+	end
+	if instance:IsA("BasePart") then
+		return instance
+	end
+	return instance:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function add(instance: Instance)
+	if byInstance[instance] then
+		return
+	end
+	local screen = findScreen(instance)
+	if not screen then
+		warn("[RoPOS] " .. instance:GetFullName() .. " is tagged " .. Config.Tags.Kiosk .. " but has no parts")
+		return
+	end
+	count += 1
+	local id = instance:GetAttribute("KioskId")
+	if typeof(id) ~= "string" or id == "" or kiosks[id] then
+		id = "K" .. count
+		instance:SetAttribute("KioskId", id)
+	end
+	local name = instance:GetAttribute("KioskName")
+	if typeof(name) ~= "string" or name == "" then
+		name = "Kiosk " .. count
+		instance:SetAttribute("KioskName", name)
+	end
+	local kiosk: Kiosk = { id = id, name = name, instance = instance, screen = screen, occupant = nil, lastActive = 0 }
+	kiosks[id] = kiosk
+	byInstance[instance] = kiosk
+	setOccupant(kiosk, nil)
+end
+
+local function remove(instance: Instance)
+	local kiosk = byInstance[instance]
+	if kiosk then
+		Kiosks.release(kiosk, "The kiosk was removed")
+		kiosks[kiosk.id] = nil
+		byInstance[instance] = nil
+	end
+end
+
+function Kiosks.all(): { Kiosk }
+	local out = {}
+	for _, kiosk in kiosks do
+		table.insert(out, kiosk)
+	end
+	return out
+end
+
+function Kiosks.init()
+	for _, instance in CollectionService:GetTagged(Config.Tags.Kiosk) do
+		add(instance)
+	end
+	CollectionService:GetInstanceAddedSignal(Config.Tags.Kiosk):Connect(add)
+	CollectionService:GetInstanceRemovedSignal(Config.Tags.Kiosk):Connect(remove)
+
+	Players.PlayerRemoving:Connect(function(player)
+		for _, kiosk in kiosks do
+			if kiosk.occupant == player then
+				Kiosks.release(kiosk, nil)
+			end
+		end
+	end)
+
+	-- Free kiosks that were walked away from or left idle.
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			for _, kiosk in kiosks do
+				local player = kiosk.occupant
+				if player then
+					if not player.Parent then
+						Kiosks.release(kiosk, nil)
+					elseif distance(kiosk, player) > Config.Kiosk.Range + 6 then
+						Kiosks.release(kiosk, "You walked away from the kiosk")
+					elseif os.clock() - kiosk.lastActive > Config.Kiosk.IdleTimeout then
+						Kiosks.release(kiosk, "The kiosk timed out")
+					end
+				end
+			end
+		end
+	end)
+end
+
+return Kiosks
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">Orders</string>
+          <string name="Source"><![CDATA[-- Order tickets for the kitchen display and the order status board.
+--
+-- Every paid sale (till or kiosk) gets an order number and a ticket that moves
+-- preparing -> ready -> collected. Tickets live on this server only, because the kitchen,
+-- the board and the customer waiting for their food are all in this server.
+
+local Players = game:GetService("Players")
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Config = require(Shared.Config)
+local Signal = require(Shared.Signal)
+local Api = require(script.Parent.Api)
+local Audit = require(script.Parent.Audit)
+
+local Orders = {}
+Orders.changed = Signal.new()
+
+export type Ticket = {
+	number: number,
+	receipt: string,
+	source: string,
+	dining: string?,
+	customer: string,
+	customerId: number,
+	lines: { { name: string, qty: number } },
+	status: "preparing" | "ready" | "collected",
+	placedAt: number, -- os.time()
+	readyAt: number?,
+}
+
+local MAX_NUMBER = 999
+
+local tickets: { Ticket } = {} -- active (preparing or ready), oldest first
+local lastNumber = 0
+local queued = false
+
+local function find(number: number): (Ticket?, number?)
+	for index, ticket in tickets do
+		if ticket.number == number then
+			return ticket, index
+		end
+	end
+	return nil, nil
+end
+
+local function announce()
+	if queued then
+		return
+	end
+	queued = true
+	task.defer(function()
+		queued = false
+		Orders.changed:Fire()
+		Api.pushWhere(function()
+			return true
+		end, "Orders", Orders.list())
+	end)
+end
+
+-- The next order number, skipping any still on the board after the counter wraps.
+function Orders.nextNumber(): number
+	for _ = 1, MAX_NUMBER do
+		lastNumber = lastNumber % MAX_NUMBER + 1
+		if not find(lastNumber) then
+			return lastNumber
+		end
+	end
+	return lastNumber
+end
+
+function Orders.add(sale)
+	if not Config.Orders.Enabled or not sale.orderNumber then
+		return
+	end
+	local lines = {}
+	for _, line in sale.lines do
+		table.insert(lines, { name = line.name, qty = line.qty })
+	end
+	table.insert(tickets, {
+		number = sale.orderNumber,
+		receipt = sale.receipt,
+		source = sale.source or "Counter",
+		dining = sale.dining,
+		customer = sale.customer.name,
+		customerId = sale.customer.userId,
+		lines = lines,
+		status = "preparing",
+		placedAt = os.time(),
+		readyAt = nil,
+	})
+	announce()
+end
+
+function Orders.list(): { Ticket }
+	local out = {}
+	for _, ticket in tickets do
+		table.insert(out, table.clone(ticket))
+	end
+	return out
+end
+
+local function remove(ticket: Ticket)
+	local _, index = find(ticket.number)
+	if index then
+		table.remove(tickets, index)
+	end
+end
+
+function Orders.markReady(number: number, by: Player): (boolean, string?)
+	local ticket = find(number)
+	if not ticket then
+		return false, "Order " .. number .. " is not on the board"
+	end
+	if ticket.status == "ready" then
+		return true
+	end
+	ticket.status = "ready"
+	local readyAt = os.time()
+	ticket.readyAt = readyAt
+	Audit.log(by, "order.ready", string.format("Order %d (%s)", number, ticket.receipt))
+
+	local customer = Players:GetPlayerByUserId(ticket.customerId)
+	if customer then
+		Api.push(customer, "OrderReady", { number = number, dining = ticket.dining })
+	end
+
+	-- Clear it from the board if nobody marks it collected.
+	task.delay(Config.Orders.ReadyClearAfter, function()
+		if ticket.status == "ready" and ticket.readyAt == readyAt then
+			ticket.status = "collected"
+			remove(ticket)
+			announce()
+		end
+	end)
+	announce()
+	return true
+end
+
+function Orders.recall(number: number, by: Player): (boolean, string?)
+	local ticket = find(number)
+	if not ticket then
+		return false, "Order " .. number .. " is not on the board"
+	end
+	ticket.status = "preparing"
+	ticket.readyAt = nil
+	Audit.log(by, "order.recall", string.format("Order %d back to preparing", number))
+	announce()
+	return true
+end
+
+function Orders.collect(number: number, by: Player): (boolean, string?)
+	local ticket = find(number)
+	if not ticket then
+		return false, "Order " .. number .. " is not on the board"
+	end
+	ticket.status = "collected"
+	remove(ticket)
+	Audit.log(by, "order.collected", string.format("Order %d (%s)", number, ticket.receipt))
+	announce()
+	return true
+end
+
+-- When a sale is refunded, its ticket comes off the board.
+function Orders.cancelReceipt(receipt: string)
+	for _, ticket in table.clone(tickets) do
+		if ticket.receipt == receipt then
+			remove(ticket)
+			announce()
+		end
+	end
+end
+
+return Orders
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="11">
         <Properties>
           <string name="Name">Registers</string>
           <string name="Source"><![CDATA[-- Physical registers. Tag any Model or BasePart with "POSRegister" (CollectionService) and it
@@ -1266,29 +2201,25 @@ return Demo
 -- Optional attributes on the tagged instance:
 --   RegisterId   (string) stable id, generated if missing
 --   RegisterName (string) shown to staff and customers
--- Optional child: a BasePart named "Screen" for the customer display (front face).
+-- Optional child: a BasePart named "Screen" for the customer "Your order" display (front face).
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
 local Config = require(Shared.Config)
 local Format = require(Shared.Format)
+local Palette = require(Shared.Palette)
 local Signal = require(Shared.Signal)
 local Api = require(script.Parent.Api)
 local Staff = require(script.Parent.Staff)
 local Shifts = require(script.Parent.Shifts)
+local Surface = require(script.Parent.Surface)
 
 local Registers = {}
 Registers.released = Signal.new() -- (register, reason)
 
-export type Display = {
-	status: TextLabel,
-	detail: TextLabel,
-	total: TextLabel,
-	accent: Frame,
-}
+export type PreviewLine = { name: string, qty: number, total: number }
 
 export type Register = {
 	id: string,
@@ -1296,12 +2227,13 @@ export type Register = {
 	instance: Instance,
 	anchor: BasePart,
 	prompt: ProximityPrompt,
-	display: Display?,
+	screen: BasePart,
 	operator: Player?,
 	shift: Shifts.Shift?,
 	order: any?, -- the pending Checkout order, if any
-	preview: { items: number, total: number }?,
+	preview: { items: number, total: number, discount: number, lines: { PreviewLine } }?,
 	flashUntil: number,
+	flashNumber: number?,
 }
 
 local registers: { [string]: Register } = {}
@@ -1309,139 +2241,186 @@ local byInstance: { [Instance]: Register } = {}
 local byOperator: { [Player]: Register } = {}
 local count = 0
 
-local COLOURS = {
-	idle = Color3.fromRGB(88, 130, 255),
-	busy = Color3.fromRGB(242, 173, 61),
-	paid = Color3.fromRGB(46, 204, 113),
-	closed = Color3.fromRGB(110, 116, 135),
-}
+local F = Surface.Fonts
+local MAX_LINES = 5
 
 local function money(n: number): string
 	return Format.money(n, Config.Currency.Symbol)
 end
 
-local function label(parent: Instance, props: { [string]: any }): TextLabel
-	local text = Instance.new("TextLabel")
-	text.BackgroundTransparency = 1
-	text.TextColor3 = Color3.fromRGB(236, 239, 245)
-	text.TextScaled = true
-	text.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold)
-	for key, value in props do
-		(text :: any)[key] = value
-	end
-	text.Parent = parent
-	return text
-end
+-- The customer-facing "Your order" screen. Redrawn from scratch on every change.
+local function draw(register: Register, state)
+	local _, root, size = Surface.create(register.screen, "RoPOSDisplay")
+	local unit = size.Y / 100
 
-local function buildDisplay(register: Register): Display?
-	local screen = register.instance:FindFirstChild("Screen", true)
-	local part = if screen and screen:IsA("BasePart") then screen else nil
-	local gui: LayerCollector
-	if part then
-		local surface = Instance.new("SurfaceGui")
-		surface.Face = Enum.NormalId.Front
-		surface.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-		surface.PixelsPerStud = 120
-		surface.LightInfluence = 0
-		surface.Brightness = 1.6
-		surface.Adornee = part
-		gui = surface
-	else
-		local board = Instance.new("BillboardGui")
-		board.Size = UDim2.fromScale(5, 2.6)
-		board.StudsOffsetWorldSpace = Vector3.new(0, 3.5, 0)
-		board.MaxDistance = 60
-		board.Adornee = register.anchor
-		gui = board
-	end
-	gui.Name = "RoPOSDisplay"
-
-	local root = Instance.new("Frame")
-	root.Size = UDim2.fromScale(1, 1)
-	root.BackgroundColor3 = Color3.fromRGB(13, 15, 20)
-	root.Parent = gui
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0.06, 0)
-	corner.Parent = root
-
-	local accent = Instance.new("Frame")
-	accent.Size = UDim2.fromScale(1, 0.05)
-	accent.BorderSizePixel = 0
-	accent.BackgroundColor3 = COLOURS.closed
-	accent.Parent = root
-
-	label(root, {
-		Name = "Store",
-		Size = UDim2.fromScale(0.9, 0.13),
-		Position = UDim2.fromScale(0.05, 0.1),
-		Text = string.upper(Config.Store.Name),
-		TextColor3 = Color3.fromRGB(146, 153, 170),
-		TextXAlignment = Enum.TextXAlignment.Left,
+	-- Header: store name and a coloured strip that shows the state at a glance.
+	Surface.box(root, { Size = UDim2.new(1, 0, 0, 3 * unit), BackgroundColor3 = state.colour })
+	Surface.text(root, {
+		Text = Config.Store.Name,
+		FontFace = F.Heavy,
+		TextSize = 9 * unit,
+		Position = UDim2.fromOffset(6 * unit, 7 * unit),
+		Size = UDim2.new(0.6, 0, 0, 10 * unit),
 	})
-	local status = label(root, {
-		Name = "Status",
-		Size = UDim2.fromScale(0.9, 0.24),
-		Position = UDim2.fromScale(0.05, 0.27),
-		TextXAlignment = Enum.TextXAlignment.Left,
-	})
-	local detail = label(root, {
-		Name = "Detail",
-		Size = UDim2.fromScale(0.9, 0.13),
-		Position = UDim2.fromScale(0.05, 0.53),
-		TextColor3 = Color3.fromRGB(146, 153, 170),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Medium),
-	})
-	local total = label(root, {
-		Name = "Total",
-		Size = UDim2.fromScale(0.9, 0.24),
-		Position = UDim2.fromScale(0.05, 0.7),
+	Surface.text(root, {
+		Text = register.name,
+		FontFace = F.Medium,
+		TextSize = 7 * unit,
+		TextColor3 = Palette.Muted,
 		TextXAlignment = Enum.TextXAlignment.Right,
-		FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold),
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -6 * unit, 0, 8 * unit),
+		Size = UDim2.new(0.4, 0, 0, 9 * unit),
 	})
 
-	gui.Parent = part or register.anchor
-	return { status = status, detail = detail, total = total, accent = accent }
+	local status = Surface.text(root, {
+		Name = "Status",
+		Text = state.status,
+		FontFace = F.Heavy,
+		TextSize = (if state.lines then 11 else 19) * unit,
+		Position = UDim2.fromOffset(6 * unit, 22 * unit),
+		Size = UDim2.new(1, -12 * unit, 0, (if state.lines then 12 else 22) * unit),
+	})
+
+	if state.lines then
+		local list = Surface.new("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(6 * unit, 36 * unit),
+			Size = UDim2.new(1, -12 * unit, 0, 40 * unit),
+			Parent = root,
+		})
+		Surface.new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = list })
+		local shown = math.min(#state.lines, MAX_LINES)
+		for i = 1, shown do
+			local line = state.lines[i]
+			local text = if i == MAX_LINES and #state.lines > MAX_LINES
+				then string.format("+ %d more", #state.lines - MAX_LINES + 1)
+				else string.format("%d × %s", line.qty, line.name)
+			local row = Surface.new("Frame", {
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 0, 0, 8 * unit),
+				LayoutOrder = i,
+				Parent = list,
+			})
+			Surface.text(
+				row,
+				{ Text = text, FontFace = F.Medium, TextSize = 6.4 * unit, Size = UDim2.fromScale(0.75, 1) }
+			)
+			if not (i == MAX_LINES and #state.lines > MAX_LINES) then
+				Surface.text(row, {
+					Text = money(line.total),
+					FontFace = F.Mono,
+					TextSize = 6 * unit,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					Position = UDim2.fromScale(0.75, 0),
+					Size = UDim2.fromScale(0.25, 1),
+				})
+			end
+		end
+	else
+		Surface.text(root, {
+			Text = state.detail,
+			FontFace = F.Medium,
+			TextSize = 8 * unit,
+			TextColor3 = Palette.Muted,
+			Position = UDim2.fromOffset(6 * unit, 46 * unit),
+			Size = UDim2.new(1, -12 * unit, 0, 10 * unit),
+		})
+	end
+
+	-- Footer: the total on a yellow bar, or the order number after payment.
+	if state.total or state.number then
+		local bar = Surface.box(root, {
+			BackgroundColor3 = state.barColour or Palette.Accent,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.new(1, 0, 0, 20 * unit),
+		})
+		local ink = state.barInk or Palette.OnAccent
+		Surface.text(bar, {
+			Text = state.barLabel or "Total",
+			FontFace = F.Bold,
+			TextSize = 8 * unit,
+			TextColor3 = ink,
+			Position = UDim2.fromOffset(6 * unit, 0),
+			Size = UDim2.fromScale(0.6, 1),
+		})
+		Surface.text(bar, {
+			Text = if state.number then "Order " .. state.number else state.total,
+			FontFace = F.Heavy,
+			TextSize = 12 * unit,
+			TextColor3 = ink,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -6 * unit, 0, 0),
+			Size = UDim2.fromScale(0.5, 1),
+		})
+	end
+	return status
 end
 
 function Registers.updateDisplay(register: Register)
-	local display = register.display
 	local operator = register.operator
 	register.prompt.ObjectText = if operator then register.name .. " · " .. operator.DisplayName else register.name
-	if not display then
-		return
-	end
 
-	local status, detail, total, colour
+	local state
 	if os.clock() < register.flashUntil then
-		status, detail, total, colour = "Thank you!", "Payment approved", "✓", COLOURS.paid
+		state = {
+			status = "Thank you!",
+			detail = if register.flashNumber then "Watch the board for your number" else "Payment approved",
+			colour = Palette.Success,
+			number = register.flashNumber,
+			barColour = Palette.Success,
+			barInk = Palette.OnSuccess,
+			barLabel = "Your order number",
+		}
 	elseif register.order then
-		status = "Please approve"
-		detail = "Waiting for " .. register.order.customer.DisplayName
-		total, colour = money(register.order.totals.total), COLOURS.busy
+		local lines = {}
+		for _, line in register.order.totals.lines do
+			table.insert(
+				lines,
+				{ name = line.name or line.productId, qty = line.qty, total = line.unitPrice * line.qty }
+			)
+		end
+		state = {
+			status = "Please approve",
+			lines = lines,
+			colour = Palette.Warning,
+			total = money(register.order.totals.total),
+			barLabel = "Approve on your screen",
+		}
 	elseif operator and register.preview and register.preview.items > 0 then
-		status = string.format("%d item%s", register.preview.items, if register.preview.items == 1 then "" else "s")
-		detail = "Served by " .. operator.DisplayName
-		total, colour = money(register.preview.total), COLOURS.idle
+		state = {
+			status = "Your order",
+			lines = register.preview.lines,
+			colour = Palette.Accent,
+			total = money(register.preview.total),
+			barLabel = if register.preview.discount > 0
+				then "Total (" .. money(register.preview.discount) .. " off)"
+				else "Total",
+		}
 	elseif operator and register.shift then
-		status, detail, total, colour = "Welcome!", operator.DisplayName .. " can take your order", "", COLOURS.idle
+		state =
+			{ status = "Welcome!", detail = operator.DisplayName .. " can take your order", colour = Palette.Accent }
 	elseif register.shift then
-		status, detail, total, colour = "Back soon", "Waiting for a cashier", "", COLOURS.closed
+		state = { status = "Back soon", detail = "Waiting for a cashier", colour = Palette.Faint }
 	else
-		status, detail, total, colour = "Closed", register.name, "", COLOURS.closed
+		state = { status = "Closed", detail = register.name, colour = Palette.Faint }
 	end
-
-	display.status.Text = status
-	display.detail.Text = detail
-	display.total.Text = total
-	TweenService:Create(display.accent, TweenInfo.new(0.35), { BackgroundColor3 = colour }):Play()
+	draw(register, state)
 end
 
-function Registers.flashPaid(register: Register)
-	register.flashUntil = os.clock() + 4
+function Registers.flashPaid(register: Register, orderNumber: number?)
+	register.flashUntil = os.clock() + 5
+	register.flashNumber = orderNumber
 	register.preview = nil
 	Registers.updateDisplay(register)
-	task.delay(4.1, Registers.updateDisplay, register)
+	local flashedAt = register.flashUntil
+	task.delay(5.1, function()
+		if register.flashUntil == flashedAt then
+			Registers.updateDisplay(register)
+		end
+	end)
 end
 
 function Registers.summary(register: Register)
@@ -1517,6 +2496,23 @@ local function findAnchor(instance: Instance): BasePart?
 	return instance:FindFirstChildWhichIsA("BasePart", true)
 end
 
+-- The customer screen: a Part named "Screen", or a small one made above the till.
+local function findScreen(instance: Instance, anchor: BasePart): BasePart
+	local screen = instance:FindFirstChild("Screen", true)
+	if screen and screen:IsA("BasePart") then
+		return screen
+	end
+	local made = Instance.new("Part")
+	made.Name = "Screen"
+	made.Anchored = true
+	made.CanCollide = false
+	made.Size = Vector3.new(3.2, 2, 0.1)
+	made.Color = Palette.Bezel
+	made.CFrame = anchor.CFrame * CFrame.new(0, anchor.Size.Y / 2 + 1.6, 0)
+	made.Parent = instance
+	return made
+end
+
 local function add(instance: Instance)
 	if byInstance[instance] then
 		return
@@ -1553,14 +2549,14 @@ local function add(instance: Instance)
 		instance = instance,
 		anchor = anchor,
 		prompt = prompt,
-		display = nil,
+		screen = findScreen(instance, anchor),
 		operator = nil,
 		shift = nil,
 		order = nil,
 		preview = nil,
 		flashUntil = 0,
+		flashNumber = nil,
 	}
-	register.display = buildDisplay(register)
 	registers[id] = register
 	byInstance[instance] = register
 
@@ -1621,7 +2617,7 @@ return Registers
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="9">
+      <Item class="ModuleScript" referent="12">
         <Properties>
           <string name="Name">Reports</string>
           <string name="Source"><![CDATA[-- Daily totals (UTC days) shared across servers. Each server keeps a delta per day and merges
@@ -1736,7 +2732,7 @@ return Reports
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="10">
+      <Item class="ModuleScript" referent="13">
         <Properties>
           <string name="Name">Sales</string>
           <string name="Source"><![CDATA[-- Receipts. Each sale is its own DataStore key ("s/BM-000042"); a rolling list of the latest
@@ -1775,6 +2771,9 @@ export type Sale = {
 	tax: number,
 	total: number,
 	refunded: { t: number, by: string, restocked: boolean }?,
+	source: string?, -- "Counter" or "Kiosk"
+	dining: string?, -- "Eat in", "Take away" or nil
+	orderNumber: number?,
 }
 
 export type Summary = {
@@ -1968,7 +2967,7 @@ return Sales
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="11">
+      <Item class="ModuleScript" referent="14">
         <Properties>
           <string name="Name">Shifts</string>
           <string name="Source"><![CDATA[-- Register shifts: open, take sales, X report at any time, Z report on close.
@@ -2054,7 +3053,7 @@ return Shifts
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="12">
+      <Item class="ModuleScript" referent="15">
         <Properties>
           <string name="Name">Staff</string>
           <string name="Source"><![CDATA[--!nolint DeprecatedApi
@@ -2144,7 +3143,7 @@ return Staff
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="13">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">Store</string>
           <string name="Source"><![CDATA[-- DataStore access with retries, a serialised flush loop, and an in-memory fallback for
@@ -2299,7 +3298,103 @@ return Store
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="14">
+      <Item class="ModuleScript" referent="17">
+        <Properties>
+          <string name="Name">Surface</string>
+          <string name="Source"><![CDATA[-- Helpers for drawing on the front face of a part (registers' customer screens, boards).
+-- Canvases are a fixed size in pixels worked out from the part, so layouts are predictable.
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Palette = require(Shared.Palette)
+
+local Surface = {}
+
+local FAMILY = "rbxasset://fonts/families/BuilderSans.json"
+Surface.Fonts = {
+	Medium = Font.new(FAMILY, Enum.FontWeight.Medium),
+	Bold = Font.new(FAMILY, Enum.FontWeight.Bold),
+	Heavy = Font.new(FAMILY, Enum.FontWeight.ExtraBold),
+	Mono = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold),
+}
+
+local PIXELS_PER_STUD = 100
+
+-- Creates a SurfaceGui on the part's front face. Returns the gui, its root frame and its size.
+function Surface.create(part: BasePart, name: string): (SurfaceGui, Frame, Vector2)
+	local existing = part:FindFirstChild(name)
+	if existing then
+		existing:Destroy()
+	end
+	local canvas = Vector2.new(part.Size.X, part.Size.Y) * PIXELS_PER_STUD
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = name
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+	gui.CanvasSize = canvas
+	gui.LightInfluence = 0
+	gui.Brightness = 1.4
+	gui.MaxDistance = 120
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Adornee = part
+
+	local root = Instance.new("Frame")
+	root.Name = "Root"
+	root.Size = UDim2.fromScale(1, 1)
+	root.BorderSizePixel = 0
+	root.BackgroundColor3 = Palette.Panel
+	root.Parent = gui
+	gui.Parent = part
+	return gui, root, canvas
+end
+
+function Surface.new(className: string, props: { [string]: any }): any
+	local instance = Instance.new(className)
+	local parent
+	for key, value in props do
+		if key == "Parent" then
+			parent = value
+		else
+			(instance :: any)[key] = value
+		end
+	end
+	instance.Parent = parent
+	return instance
+end
+
+function Surface.text(parent: Instance, props: { [string]: any }): TextLabel
+	local defaults = {
+		BackgroundTransparency = 1,
+		TextColor3 = Palette.Text,
+		FontFace = Surface.Fonts.Bold,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = parent,
+	}
+	for key, value in props do
+		defaults[key] = value
+	end
+	return Surface.new("TextLabel", defaults)
+end
+
+function Surface.box(parent: Instance, props: { [string]: any }): Frame
+	local defaults = { BorderSizePixel = 0, BackgroundColor3 = Palette.Raised, Parent = parent }
+	local radius = props.Radius
+	props.Radius = nil
+	for key, value in props do
+		defaults[key] = value
+	end
+	local frame = Surface.new("Frame", defaults)
+	if radius then
+		Surface.new("UICorner", { CornerRadius = UDim.new(0, radius), Parent = frame })
+	end
+	return frame
+end
+
+return Surface
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">Wallet</string>
           <string name="Source"><![CDATA[-- The customer's money.

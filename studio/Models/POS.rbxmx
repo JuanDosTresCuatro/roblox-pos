@@ -262,14 +262,41 @@ Config.Data = {
 	FlushInterval = 20, -- seconds between batched DataStore writes
 }
 
+Config.Orders = {
+	-- Every paid sale gets an order number and a ticket on the kitchen display.
+	Enabled = true,
+	-- Asked at the kiosk and on the till. Use {} to not ask.
+	DiningOptions = { "Eat in", "Take away" },
+	-- Seconds a ready order stays on the status board before it is cleared.
+	ReadyClearAfter = 120,
+	-- Ticket colours on the kitchen display: amber after this many seconds, red after the second.
+	LateAfter = { 120, 300 },
+}
+
+Config.Kiosk = {
+	Enabled = true,
+	-- The customer must stand within this distance to use a kiosk (about 3 m).
+	Range = 11,
+	-- A kiosk returns to its start screen after this many seconds without a tap.
+	IdleTimeout = 60,
+}
+
 Config.Demo = {
-	-- Build a shop counter if the place has no register tagged "POSRegister".
+	-- Build a demo restaurant (till, kiosks, kitchen display, boards) if the place has no register.
 	SpawnRegister = true,
 	-- Create simple item Tools for products that have no Tool in ServerStorage.POSItems.
 	CreateItemTools = true,
 }
 
-Config.RegisterTag = "POSRegister"
+-- CollectionService tags. Tag a Model or Part to turn it into that piece of equipment.
+Config.Tags = {
+	Register = "POSRegister", -- staff till with a customer "Your order" screen
+	Kiosk = "POSKiosk", -- self-order touchscreen
+	Kitchen = "POSKitchenDisplay", -- kitchen display: tickets with a Ready button for staff
+	OrderBoard = "POSOrderBoard", -- "Preparing" and "Ready" order numbers
+	MenuBoard = "POSMenuBoard", -- menu with live prices (attribute Category = one category)
+}
+Config.RegisterTag = Config.Tags.Register
 
 Config.Categories = { "Snacks", "Gear", "Tools", "Cosmetics" }
 
@@ -582,6 +609,54 @@ return Net
     </Item>
     <Item class="ModuleScript" referent="5">
       <Properties>
+        <string name="Name">Palette</string>
+        <string name="Source"><![CDATA[--!strict
+-- Colours shared by the POS window, the kiosks and every screen in the world.
+-- A clean white look with a warm yellow accent. Change these to rebrand everything at once.
+
+local rgb = Color3.fromRGB
+
+return {
+	Backdrop = rgb(10, 10, 14),
+	Bg = rgb(244, 244, 240),
+	Panel = rgb(255, 255, 255),
+	Raised = rgb(243, 243, 238),
+	RaisedHover = rgb(232, 232, 225),
+	Border = rgb(222, 222, 213),
+	Text = rgb(23, 23, 26),
+	Muted = rgb(102, 102, 110),
+	Faint = rgb(150, 150, 158),
+
+	Accent = rgb(255, 194, 14), -- brand yellow
+	AccentHover = rgb(255, 207, 64),
+	AccentSoft = rgb(255, 244, 205),
+	AccentText = rgb(140, 90, 0), -- yellow is unreadable as text on white; use this instead
+	OnAccent = rgb(23, 23, 26), -- text on a yellow fill
+
+	Success = rgb(22, 163, 74),
+	SuccessHover = rgb(30, 180, 86),
+	SuccessSoft = rgb(220, 247, 228),
+	OnSuccess = rgb(255, 255, 255),
+	Warning = rgb(217, 119, 6),
+	WarningSoft = rgb(254, 240, 199),
+	Danger = rgb(220, 38, 38),
+	DangerHover = rgb(235, 70, 70),
+	DangerSoft = rgb(253, 226, 226),
+	OnDanger = rgb(255, 255, 255),
+
+	Paper = rgb(255, 255, 251),
+	Ink = rgb(28, 28, 32),
+
+	-- Physical equipment in the demo world
+	Bezel = rgb(28, 30, 36),
+	Steel = rgb(70, 74, 84),
+	WhiteBody = rgb(236, 237, 240),
+}
+]]></string>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="6">
+      <Properties>
         <string name="Name">Pricing</string>
         <string name="Source"><![CDATA[--!strict
 -- Line pricing shared by the client (live cart preview) and the server (authoritative totals).
@@ -667,7 +742,7 @@ return Pricing
 ]]></string>
       </Properties>
     </Item>
-    <Item class="ModuleScript" referent="6">
+    <Item class="ModuleScript" referent="7">
       <Properties>
         <string name="Name">Roles</string>
         <string name="Source"><![CDATA[--!strict
@@ -700,7 +775,7 @@ return Roles
 ]]></string>
       </Properties>
     </Item>
-    <Item class="ModuleScript" referent="7">
+    <Item class="ModuleScript" referent="8">
       <Properties>
         <string name="Name">Signal</string>
         <string name="Source"><![CDATA[-- Minimal pure-Luau signal. Handlers run in their own thread so one error cannot break others.
@@ -740,7 +815,7 @@ return Signal
 ]]></string>
       </Properties>
     </Item>
-    <Item class="ModuleScript" referent="8">
+    <Item class="ModuleScript" referent="9">
       <Properties>
         <string name="Name">Validate</string>
         <string name="Source"><![CDATA[--!strict

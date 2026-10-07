@@ -57,7 +57,7 @@ function Toasts.show(text: string, kind: string?)
 				Text = style.icon,
 				FontFace = F.Heavy,
 				TextSize = 14,
-				TextColor3 = C.Bg,
+				TextColor3 = C.Panel,
 				BackgroundColor3 = style.colour,
 				Size = UDim2.fromOffset(22, 22),
 				Children = { UI.corner(Theme.Radius.Pill) },

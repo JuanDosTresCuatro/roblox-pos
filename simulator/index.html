@@ -4,34 +4,40 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=Roboto+Mono:wght@400;700&display=swap">
 <style>
-/* Layout: a play-test bench on a baseplate. Left, the staff POS window as it appears in game.
-   Right, what is happening in the world: the register's customer screen and the customer's own screen.
-   Below, the server log of every API call. Single dark look on purpose: it is the in-game UI. */
+/* Layout: the demo restaurant as it stands in Roblox. Top, the wall of screens and the two
+   self-order kiosks. Below, the staff POS window and the customer's own screen, then the server log.
+   Light theme with a yellow accent, matching the in-game palette. */
 :root {
-  color-scheme: dark;
-  /* RoPOS Theme.luau tokens */
-  --backdrop: #07080b;
-  --bg: #0d0f14;
-  --panel: #14171f;
-  --raised: #1c202b;
-  --raised-hover: #242937;
-  --border: #2c3242;
-  --text: #eceff5;
-  --muted: #9299aa;
-  --faint: #62697c;
-  --accent: #5c84ff;
-  --accent-hover: #7698ff;
-  --accent-soft: #222c4e;
-  --success: #2ecc71;
-  --success-ink: #08301c;
-  --success-soft: #163a29;
-  --warning: #f2ad3d;
-  --warning-soft: #42321e;
-  --danger: #eb5757;
-  --danger-soft: #461c20;
-  --paper: #faf8f2;
+  color-scheme: light;
+  /* RoPOS Palette.luau tokens */
+  --room: #e7e8ec;
+  --floor: #d9dadf;
+  --bg: #f4f4f0;
+  --panel: #ffffff;
+  --raised: #f3f3ee;
+  --raised-hover: #e8e8e1;
+  --border: #deded5;
+  --text: #17171a;
+  --muted: #66666e;
+  --faint: #96969e;
+  --accent: #ffc20e;
+  --accent-hover: #ffcf40;
+  --accent-soft: #fff4cd;
+  --accent-text: #8c5a00;
+  --on-accent: #17171a;
+  --success: #16a34a;
+  --success-ink: #ffffff;
+  --success-soft: #dcf7e4;
+  --warning: #d97706;
+  --warning-soft: #fef0c7;
+  --danger: #dc2626;
+  --danger-soft: #fde2e2;
+  --paper: #fffffb;
   --ink: #1c1c20;
-  --stud: #10131a;
+  --bezel: #1c1e24;
+  --steel: #464a54;
+  --white-body: #eceef0;
+  --shadow: rgba(20, 22, 30, .16);
 
   --ui: "Figtree", "Segoe UI", system-ui, -apple-system, sans-serif;
   --mono: "Roboto Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -45,9 +51,7 @@
 html, body { min-height: 100%; }
 body {
   margin: 0;
-  background-color: var(--backdrop);
-  background-image: radial-gradient(circle at 50% 50%, var(--stud) 0 5px, transparent 6px);
-  background-size: 28px 28px;
+  background: var(--room);
   color: var(--text);
   font: 500 15px/1.4 var(--ui);
   padding: 20px 20px 40px;
@@ -68,8 +72,8 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .brand p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
 .logo {
   width: 42px; height: 42px; border-radius: var(--r-m); display: grid; place-items: center;
-  font-weight: 900; font-size: 20px; color: #fff;
-  background: linear-gradient(135deg, var(--accent-hover), #965cff);
+  font-weight: 900; font-size: 20px; color: var(--on-accent);
+  background: linear-gradient(135deg, var(--accent-hover), var(--accent));
 }
 .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .seg { display: inline-flex; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
@@ -98,7 +102,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .pill.ok { background: var(--success-soft); color: var(--success); }
 .pill.warn { background: var(--warning-soft); color: var(--warning); }
 .pill.bad { background: var(--danger-soft); color: var(--danger); }
-.pill.info { background: var(--accent-soft); color: var(--accent-hover); }
+.pill.info { background: var(--accent-soft); color: var(--accent-text); }
 .tabs { display: flex; gap: 6px; margin-top: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); overflow-x: auto; }
 .tabs button { padding: 8px 14px; border-radius: var(--r-s); color: var(--muted); font-weight: 700; white-space: nowrap; }
 .tabs button:hover { background: var(--raised); }
@@ -112,7 +116,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 }
 .btn:hover { background: var(--raised-hover); }
 .btn:active { transform: scale(.97); }
-.btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+.btn.primary { background: var(--accent); border-color: transparent; color: var(--on-accent); }
 .btn.primary:hover { background: var(--accent-hover); }
 .btn.success { background: var(--success); border-color: transparent; color: var(--success-ink); }
 .btn.danger { background: var(--danger); border-color: transparent; color: #fff; }
@@ -142,12 +146,12 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 @media (max-width: 860px) { .sell { grid-template-columns: minmax(0, 1fr); } }
 .catalogue { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
-.chips .btn[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.chips .btn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: transparent; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; align-content: start; }
 .tile {
-  position: relative; text-align: left; height: 112px; padding: 12px; border-radius: var(--r-m);
+  position: relative; text-align: left; height: 118px; padding: 12px; border-radius: var(--r-m);
   background: var(--raised); border: 1px solid var(--border); transition: background .15s, border-color .15s, transform .1s;
-  display: grid; grid-template-rows: 36px 1fr auto; gap: 6px;
+  display: grid; grid-template-rows: 36px 1fr auto; gap: 4px;
 }
 .tile:hover { background: var(--raised-hover); }
 .tile:active { transform: scale(.96); }
@@ -158,10 +162,10 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
   color: #fff; font-weight: 900; text-shadow: 0 1px 2px rgba(0,0,0,.4);
   background-image: linear-gradient(180deg, rgba(255,255,255,.18), rgba(0,0,0,.12));
 }
-.tile .name { font-weight: 700; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tile .price { font-weight: 900; font-size: 18px; color: var(--accent-hover); }
+.tile .name { font-weight: 700; font-size: 15px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; align-self: end; }
+.tile .price { font-weight: 900; font-size: 18px; color: var(--accent-text); }
 .tile .stock { position: absolute; top: 12px; right: 10px; height: 22px; font-size: 12px; }
-.tile .qty { position: absolute; right: 10px; bottom: 10px; background: var(--accent); color: #fff; height: 22px; font-size: 12px; }
+.tile .qty { position: absolute; right: 10px; bottom: 10px; background: var(--accent); color: var(--on-accent); height: 22px; font-size: 12px; }
 
 .order {
   position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-l);
@@ -173,7 +177,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .picker {
   position: absolute; left: 14px; right: 14px; top: 104px; z-index: 5; background: var(--raised);
   border: 1px solid var(--accent); border-radius: var(--r-m); padding: 8px; display: grid; gap: 4px;
-  box-shadow: 0 12px 30px rgba(0,0,0,.45);
+  box-shadow: 0 12px 30px var(--shadow);
 }
 .picker button { text-align: left; padding: 9px 10px; border-radius: var(--r-s); display: flex; justify-content: space-between; gap: 8px; }
 .picker button:hover { background: var(--raised-hover); }
@@ -195,7 +199,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .summary { border-top: 1px solid var(--border); padding-top: 10px; display: grid; gap: 6px; }
 .discounts { display: flex; gap: 6px; flex-wrap: wrap; }
 .discounts .btn { height: 30px; padding: 0 10px; font-size: 13px; }
-.discounts .btn[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.discounts .btn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: transparent; }
 .row { display: flex; justify-content: space-between; color: var(--muted); }
 .row.total { color: var(--text); font-weight: 900; font-size: 20px; align-items: baseline; }
 .row.total .money { font-size: 28px; }
@@ -282,20 +286,114 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 
 /* World column */
 .world { display: grid; gap: 16px; }
-.screen-mount { background: #23262e; border-radius: var(--r-l); padding: 18px 18px 0; border: 1px solid var(--border); }
-.screen-mount .label { margin-bottom: 10px; display: block; }
-.screen {
-  position: relative; background: #0b0d11; border-radius: 10px; aspect-ratio: 13 / 8; max-width: 100%;
-  padding: 7% 7% 6%; display: grid; grid-template-rows: auto auto auto 1fr; overflow: hidden;
-  box-shadow: inset 0 0 0 3px #000, 0 0 40px color-mix(in srgb, var(--screen-accent, var(--faint)) 22%, transparent);
-  --screen-accent: var(--faint);
-}
-.screen::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 5%; background: var(--screen-accent); transition: background .35s; }
-.screen .store { color: var(--muted); font-weight: 900; letter-spacing: .08em; font-size: clamp(11px, 1.1vw, 14px); }
-.screen .status { font-weight: 900; font-size: clamp(24px, 2.6vw, 34px); line-height: 1.1; margin-top: 4px; }
-.screen .detail { color: var(--muted); font-weight: 600; font-size: clamp(13px, 1.2vw, 16px); }
-.screen .amount { align-self: end; justify-self: end; font: 700 clamp(26px, 3vw, 40px) var(--mono); }
-.stand { width: 18%; height: 26px; margin: 0 auto; background: #2c3242; border-radius: 0 0 4px 4px; }
+/* The restaurant scene */
+.scene { background: linear-gradient(180deg, var(--room) 0 78%, var(--floor) 78% 100%); border-radius: var(--r-l); padding: 22px 22px 0; overflow-x: auto; }
+.wall { display: grid; grid-template-columns: 1fr 1.3fr 1.05fr 1.15fr; gap: 16px; align-items: start; min-width: 980px; }
+.col-a { display: grid; gap: 12px; }
+.tv { background: var(--bezel); border-radius: 8px; padding: 7px; box-shadow: 0 10px 24px var(--shadow); }
+.tv-screen { background: var(--panel); border-radius: 3px; overflow: hidden; position: relative; aspect-ratio: 16 / 9; font-size: 11px; }
+.tv.big .tv-screen { aspect-ratio: 4 / 5; font-size: 13px; }
+.tv-label { color: var(--faint); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; margin: 6px 2px 0; }
+.kiosks { display: flex; gap: 18px; justify-content: center; align-items: end; align-self: end; padding-top: 40px; }
+.kiosk { width: 47%; display: grid; justify-items: center; }
+.kiosk .housing { width: 100%; background: var(--bezel); border-radius: 10px 10px 6px 6px; padding: 8px 8px 30px; position: relative; box-shadow: 0 10px 24px var(--shadow); }
+.kiosk.white .housing { background: var(--white-body); border: 1px solid var(--border); }
+.kiosk .glass { background: var(--bezel); border-radius: 5px; padding: 4px; }
+.kiosk .kiosk-screen { background: var(--panel); border-radius: 3px; aspect-ratio: 31 / 45; overflow: hidden; position: relative; font-size: 10px; display: flex; flex-direction: column; }
+.kiosk .reader { position: absolute; right: 12px; bottom: 6px; width: 20px; height: 18px; background: var(--steel); border-radius: 3px; }
+.kiosk .reader::after { content: ""; position: absolute; left: 4px; right: 4px; top: 3px; height: 2px; background: var(--success); }
+.kiosk .slot { position: absolute; left: 14px; bottom: 12px; width: 30px; height: 3px; background: var(--accent); border-radius: 2px; }
+.kiosk .pole { width: 12%; height: 70px; background: var(--steel); }
+.kiosk.white .pole { width: 72%; background: var(--white-body); border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+.kiosk .foot { width: 90%; height: 10px; background: var(--steel); border-radius: 4px 4px 0 0; }
+.counter-strip { height: 16px; background: var(--white-body); border-top: 3px solid var(--steel); margin: 14px -22px 0; border-bottom: 4px solid var(--accent); }
+
+/* Shared bits inside screens */
+.sc-head { display: flex; justify-content: space-between; align-items: center; padding: .6em .9em; font-weight: 900; }
+.sc-head small { font-weight: 600; color: var(--muted); }
+.sc-strip { height: 4px; }
+.board { display: grid; grid-template-columns: 1fr 1fr; gap: .6em; padding: .6em; height: 100%; }
+.board > div { background: var(--raised); border-radius: .5em; overflow: hidden; display: flex; flex-direction: column; }
+.board h4 { margin: 0; padding: .35em; text-align: center; font-size: 1.25em; font-weight: 900; }
+.board .prep h4 { background: var(--accent); color: var(--on-accent); }
+.board .ready h4 { background: var(--success); color: var(--success-ink); }
+.board .nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: .2em; padding: .4em; font-weight: 900; font-size: 1.6em; text-align: center; align-content: start; }
+.board .ready .nums { color: var(--success); font-size: 1.9em; }
+.kds { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
+.kds .top { background: var(--text); color: var(--panel); display: flex; justify-content: space-between; padding: .3em .7em; font-weight: 900; }
+.kds .top small { color: var(--faint); font-weight: 600; }
+.kds .tickets { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4em; padding: .4em; min-height: 0; }
+.ticket { background: var(--panel); border: 1px solid var(--border); border-radius: .4em; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.ticket .th { color: #fff; padding: .2em .4em; display: flex; justify-content: space-between; font-weight: 900; }
+.ticket .th small { font-family: var(--mono); font-weight: 700; }
+.ticket .tl { padding: .25em .4em; font-weight: 700; flex: 1; line-height: 1.3; font-size: .95em; overflow: hidden; }
+.ticket .tl small { color: var(--muted); font-weight: 600; display: block; }
+.ticket button { margin: .3em; border-radius: .3em; background: var(--success); color: #fff; font-weight: 900; padding: .25em; font-size: .95em; }
+.kds .readybar { background: var(--success-soft); padding: .3em .5em; display: flex; gap: .4em; align-items: center; flex-wrap: wrap; font-weight: 900; color: var(--success); }
+.kds .readybar span.chip { background: var(--panel); border-radius: .3em; padding: .1em .35em; display: inline-flex; gap: .3em; align-items: center; }
+.kds .readybar button { font-size: .85em; font-weight: 800; color: var(--text); background: var(--raised); border-radius: .25em; padding: .05em .35em; }
+.kds .empty-k { grid-column: 1 / -1; display: grid; place-items: center; color: var(--faint); font-weight: 800; }
+.menu { padding: .5em .8em; height: 100%; display: flex; flex-direction: column; }
+.menu h4 { margin: .1em 0 .1em; text-align: center; font-size: 1.6em; font-weight: 900; }
+.menu .rule { width: 18%; height: 3px; background: var(--accent); margin: 0 auto .5em; border-radius: 2px; }
+.menu .items { flex: 1; display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: .4em; align-content: center; }
+.menu .item { text-align: center; font-weight: 700; line-height: 1.2; }
+.menu .item i { display: grid; place-items: center; width: 2.4em; height: 2.4em; margin: 0 auto .2em; border-radius: 50%; color: #fff; font-style: normal; font-weight: 900; }
+.menu .item b { display: block; color: var(--accent-text); font-weight: 900; }
+.menu .item.out { color: var(--faint); }
+.menu .item.out b { color: var(--danger); }
+.your { display: flex; flex-direction: column; height: 100%; }
+.your .status { font-size: 2.1em; font-weight: 900; padding: .1em .7em 0; line-height: 1.1; }
+.your .detail { color: var(--muted); padding: .2em .75em; font-weight: 600; font-size: 1.15em; }
+.your .lines { padding: .5em .8em; flex: 1; display: grid; gap: .25em; align-content: start; font-size: 1.15em; }
+.your .lines div { display: flex; justify-content: space-between; }
+.your .lines span:last-child { font-family: var(--mono); font-weight: 700; }
+.your .bar { background: var(--accent); color: var(--on-accent); display: flex; justify-content: space-between; align-items: center; padding: .6em .9em; font-weight: 800; }
+.your .bar b { font-size: 1.8em; font-weight: 900; }
+.your .bar.ok { background: var(--success); color: var(--success-ink); }
+.your .big-num { font-size: 4.5em; font-weight: 900; text-align: center; line-height: 1; padding-top: .2em; }
+/* kiosk screen */
+.k-top { background: var(--accent); color: var(--on-accent); padding: .7em .8em; display: flex; justify-content: space-between; align-items: center; font-weight: 900; }
+.k-top small { display: block; font-weight: 600; }
+.k-top button { background: var(--text); color: var(--panel); border-radius: 999px; padding: .2em .7em; font-weight: 800; font-size: .95em; }
+.k-hero { background: var(--accent); color: var(--on-accent); flex: 0 0 44%; display: grid; place-content: center; text-align: center; }
+.k-hero b { font-size: 2.2em; font-weight: 900; display: block; }
+.k-body { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: .8em; padding: 1em; text-align: center; min-height: 0; }
+.k-btn { background: var(--accent); color: var(--on-accent); border-radius: .8em; padding: .8em; font-weight: 900; font-size: 1.25em; }
+.k-btn.go { background: var(--success); color: var(--success-ink); }
+.k-btn.alt { background: var(--raised); color: var(--text); border: 1px solid var(--border); }
+.k-btn[disabled] { background: var(--raised); color: var(--faint); cursor: not-allowed; }
+.k-btn.pulse { animation: pulse 1.8s ease-in-out infinite; }
+.k-dine { display: grid; grid-template-columns: 1fr 1fr; gap: .6em; }
+.k-dine button { background: var(--raised); border: 1px solid var(--border); border-radius: .8em; padding: 1em .3em; font-weight: 900; font-size: 1.1em; }
+.k-dine button:hover { background: var(--accent-soft); }
+.k-dine span { display: block; font-size: 2.2em; }
+.k-menu { flex: 1; display: grid; grid-template-columns: 30% 1fr; min-height: 0; }
+.k-cats { background: var(--raised); padding: .4em; display: grid; gap: .3em; align-content: start; }
+.k-cats button { border-radius: .5em; padding: .5em .2em; font-weight: 800; font-size: .95em; color: var(--muted); }
+.k-cats button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.k-grid { overflow-y: auto; padding: .4em; display: grid; grid-template-columns: 1fr 1fr; gap: .4em; align-content: start; }
+.k-item { position: relative; border: 1px solid var(--border); border-radius: .6em; padding: .4em .2em; text-align: center; font-weight: 700; line-height: 1.2; background: var(--panel); }
+.k-item.in { border: 2px solid var(--accent); }
+.k-item i { display: grid; place-items: center; width: 2.2em; height: 2.2em; margin: 0 auto .2em; border-radius: 50%; color: #fff; font-style: normal; font-weight: 900; }
+.k-item b { display: block; color: var(--accent-text); }
+.k-item .q { position: absolute; top: .2em; right: .2em; background: var(--accent); border-radius: 999px; padding: 0 .4em; font-weight: 900; font-size: .9em; }
+.k-foot { border-top: 1px solid var(--border); padding: .5em .6em; display: flex; justify-content: space-between; align-items: center; gap: .4em; }
+.k-foot b { font-size: 1.4em; font-weight: 900; display: block; }
+.k-foot small { color: var(--muted); }
+.k-lines { flex: 1; overflow-y: auto; padding: .5em; display: grid; gap: .35em; align-content: start; }
+.k-line { background: var(--raised); border-radius: .5em; padding: .4em .5em; display: grid; grid-template-columns: 1fr auto auto; gap: .4em; align-items: center; font-weight: 700; }
+.k-line small { display: block; color: var(--muted); font-weight: 600; }
+.k-line .st { display: flex; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; }
+.k-line .st button { width: 1.8em; height: 1.8em; font-weight: 900; }
+.k-total { padding: .5em .7em; border-top: 1px solid var(--border); display: grid; gap: .4em; }
+.k-total .row { font-size: 1.15em; }
+.k-total .acts { display: grid; grid-template-columns: 1fr 1.6fr; gap: .4em; }
+.k-done { background: var(--success); color: var(--success-ink); flex: 0 0 34%; display: grid; place-content: center; text-align: center; font-weight: 900; }
+.k-done span { font-size: 3em; line-height: 1; }
+.k-num { font-size: 5em; font-weight: 900; line-height: 1; }
+@keyframes pulse { 50% { transform: scale(1.04); } }
+@media (max-width: 1100px) { .scene { padding: 14px 14px 0; } }
 
 .phone { background: var(--panel); border: 1px solid var(--border); border-radius: 28px; padding: 14px; display: grid; gap: 12px; position: relative; min-height: 470px; align-content: start; }
 .phone-head { display: flex; align-items: center; gap: 10px; }
@@ -350,9 +448,9 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 
 /* Toasts */
 .toasts { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 60; display: grid; gap: 8px; justify-items: center; pointer-events: none; width: min(440px, calc(100% - 32px)); }
-.toast { display: flex; gap: 10px; align-items: center; background: var(--raised); border: 1px solid var(--border); border-radius: var(--r-m); padding: 10px 16px 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.4); animation: pop .3s cubic-bezier(.2,.9,.3,1.2); }
+.toast { display: flex; gap: 10px; align-items: center; background: var(--raised); border: 1px solid var(--border); border-radius: var(--r-m); padding: 10px 16px 10px 12px; box-shadow: 0 10px 30px var(--shadow); animation: pop .3s cubic-bezier(.2,.9,.3,1.2); }
 .toast i { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 900; font-size: 13px; color: var(--bg); flex: none; }
-.toast.info i { background: var(--accent); } .toast.success i { background: var(--success); }
+.toast.info i { background: var(--accent); color: var(--on-accent); } .toast.success i { background: var(--success); }
 .toast.warning i { background: var(--warning); } .toast.error i { background: var(--danger); }
 .toast.success { border-color: color-mix(in srgb, var(--success) 50%, var(--border)); }
 .toast.error { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
@@ -365,7 +463,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .log ol { list-style: none; margin: 0; padding: 0; max-height: 230px; overflow-y: auto; font: 13px/1.6 var(--mono); }
 .log li { display: grid; grid-template-columns: 70px 50px minmax(0, 1fr); gap: 10px; border-bottom: 1px dashed var(--border); padding: 3px 0; }
 .log li > span:last-child { min-width: 0; overflow-wrap: anywhere; }
-.log .who { color: var(--accent-hover); }
+.log .who { color: var(--accent-text); }
 .log .okay { color: var(--success); } .log .fail { color: var(--danger); } .log .push { color: var(--warning); }
 .guide { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-l); padding: 14px 16px; }
 .guide ol { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 6px; color: var(--muted); }
@@ -384,7 +482,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
       <div class="logo" aria-hidden="true">B</div>
       <div>
         <h1>RoPOS Simulator</h1>
-        <p>Try the Roblox point of sale in your browser. You play the staff on the left and the customers on the right.</p>
+        <p>The demo restaurant from Roblox, in your browser. Tap the kiosks, run the till, and mark orders ready on the kitchen display.</p>
       </div>
     </div>
     <div class="controls">
@@ -394,14 +492,26 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
     </div>
   </header>
 
+  <section class="scene" aria-label="The restaurant">
+    <div class="wall">
+      <div class="col-a">
+        <div><div class="tv"><div class="tv-screen" id="orderBoard"></div></div><p class="tv-label">Order status board</p></div>
+        <div><div class="tv"><div class="tv-screen" id="kitchen"></div></div><p class="tv-label">Kitchen display</p></div>
+        <div><div class="tv"><div class="tv-screen" id="menuSnacks"></div></div><p class="tv-label">Menu board</p></div>
+      </div>
+      <div><div class="tv big"><div class="tv-screen" id="screen" aria-live="polite"></div></div><p class="tv-label">Till customer screen</p></div>
+      <div><div class="tv big"><div class="tv-screen" id="menuGear"></div></div><p class="tv-label">Menu board</p></div>
+      <div class="kiosks">
+        <div class="kiosk"><div class="housing"><div class="glass"><div class="kiosk-screen" id="kiosk-K1"></div></div><span class="slot"></span><span class="reader"></span></div><div class="pole"></div><div class="foot"></div></div>
+        <div class="kiosk white"><div class="housing"><div class="glass"><div class="kiosk-screen" id="kiosk-K2"></div></div><span class="slot"></span><span class="reader"></span></div><div class="pole"></div><div class="foot"></div></div>
+      </div>
+    </div>
+    <div class="counter-strip" aria-hidden="true"></div>
+  </section>
+
   <section class="stage">
     <div class="window" id="window" aria-label="POS window"></div>
     <aside class="world">
-      <div class="screen-mount">
-        <span class="label">Customer screen on the till</span>
-        <div class="screen" id="screen" aria-live="polite"></div>
-        <div class="stand" aria-hidden="true"></div>
-      </div>
       <div class="phone" id="phone" aria-label="Customer's screen"></div>
     </aside>
   </section>
@@ -414,7 +524,8 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
     <div class="guide">
       <span class="label">Things to try</span>
       <ol>
-        <li><b>Use register</b>, then <b>Open shift</b> on the Shift tab.</li>
+        <li>On the black kiosk, press <b>Touch to start</b>, pick <b>Eat in</b>, add items and <b>Pay</b>. Watch order 1 appear on the board and the kitchen display.</li>
+        <li>Press <b>Ready</b> on the kitchen display: the order moves to Ready and Bob is told.</li>
         <li>Add items, choose <b>Bob</b> and press <b>Charge</b>. Pay on Bob's screen.</li>
         <li>Charge Eve while she is away from the counter, then switch her <b>At the counter</b> on.</li>
         <li>Charge a <b>Golden Crown</b>: Bob can't afford £150.</li>
@@ -444,6 +555,8 @@ const CONFIG = {
   discounts: { presets: [0, 5, 10, 15, 25, 50], cashierMax: 10, managerMax: 100 },
   checkout: { customerRange: 16, timeout: 30, maxLines: 20, maxQty: 20 },
   lowStockAt: 5,
+  orders: { diningOptions: ["Eat in", "Take away"], readyClearAfter: 120, lateAfter: [120, 300] },
+  kiosk: { idleTimeout: 60 },
   categories: ["Snacks", "Gear", "Tools", "Cosmetics"],
 };
 const SEED = [
@@ -547,6 +660,9 @@ const server = {
     this.register = { name: "Front Counter", operator: null, shift: null, order: null, preview: null, flashUntil: 0 };
     this.audit = [];
     this.days = seedDays();
+    this.orders = [];
+    this.lastNumber = 0;
+    this.kiosks = { K1: { name: "Kiosk 1", occupant: null }, K2: { name: "Kiosk 2", occupant: null } };
   },
 
   audit_(actor, action, detail) { this.audit.unshift({ t: Date.now(), actor: actor.name, action, detail }); },
@@ -623,7 +739,8 @@ const server = {
       try {
         const c = this.validateCart(cart);
         const totals = this.price(c, Math.min(discount, this.maxDiscount(p)));
-        r.preview = { items: c.reduce((n, l) => n + l.qty, 0), total: totals.total };
+        r.preview = { items: c.reduce((n, l) => n + l.qty, 0), total: totals.total, discount: totals.discount,
+          lines: totals.lines.map((l) => ({ name: l.name, qty: l.qty, total: l.unitPrice * l.qty })) };
       } catch { r.preview = null; }
     }],
     "register.customers": [ROLES.Cashier, function (p) {
@@ -647,7 +764,7 @@ const server = {
       this.audit_(p, "shift.close", `${r.name}: ${z.totals.count} sales, net ${money(z.net)}`);
       return z;
     }],
-    "checkout.start": [ROLES.Cashier, function (p, cart, discountPct, customerKey) {
+    "checkout.start": [ROLES.Cashier, function (p, cart, discountPct, customerKey, dining) {
       const r = this.myRegister(p);
       if (!r.shift) fail("Open a shift before taking payments");
       if (r.order) fail("This register is already waiting for a payment");
@@ -659,6 +776,7 @@ const server = {
       if (!this.atCounter[customer.key]) fail(`${customer.name} needs to stand at the register`);
       const totals = this.price(c, discountPct);
       const order = { id: crypto.randomUUID?.() ?? String(Math.random()), operator: p, customer, cart: c, discountPct, totals, status: "pending",
+        dining: CONFIG.orders.diningOptions.includes(dining) ? dining : null,
         expiresAt: Date.now() + CONFIG.checkout.timeout * 1000 };
       order.timer = setTimeout(() => { this.finish(order, "expired", `${customer.name} did not respond in time`); render(); }, CONFIG.checkout.timeout * 1000);
       r.order = order;
@@ -686,26 +804,14 @@ const server = {
         this.finish(o, "cancelled", "Prices or stock changed. Ring up the order again.");
         fail("Prices or stock changed. The cashier needs to ring this up again.");
       }
-      if (this.wallets[p.key] < o.totals.total) fail(`You don't have enough ${CONFIG.currency.stat}`);
-      // Debit and stock in one step, as on the real server.
-      this.wallets[p.key] -= o.totals.total;
-      o.status = "paid"; clearTimeout(o.timer); this.register.order = null;
-      for (const l of o.totals.lines) { const prod = this.products[l.productId]; if (prod.stock != null) prod.stock = Math.max(0, prod.stock - l.qty); }
       const r = this.register;
-      const sale = { receipt: `${CONFIG.store.prefix}-${String(++this.counter).padStart(6, "0")}`, t: Date.now(), registerName: r.name,
-        cashier: { name: o.operator.name }, customer: { key: p.key, name: p.name },
-        lines: o.totals.lines.map((l) => ({ productId: l.productId, name: l.name, qty: l.qty, unitPrice: l.unitPrice, discount: l.discount, tax: l.tax, total: l.total })),
-        discountPct: o.discountPct, subtotal: o.totals.subtotal, discount: o.totals.discount, tax: o.totals.tax, total: o.totals.total, refunded: null };
-      this.sales.unshift(sale);
-      if (r.shift) addSale(r.shift.totals, sale);
-      addSale(this.today(), sale);
-      for (const l of sale.lines) if (this.products[l.productId].tool) for (let i = 0; i < l.qty; i++) this.backpacks[p.key].push(l.name);
-      r.preview = null; r.flashUntil = Date.now() + 4000; setTimeout(render, 4100);
-      if (o.discountPct > 0) this.audit_(o.operator, "discount", `${sale.receipt}: ${o.discountPct}% (${money(sale.discount)} off)`);
-      this.audit_(o.operator, "sale", `${sale.receipt}: ${money(sale.total)} to ${p.name}`);
+      const sale = this.complete({ customer: p, totals: o.totals, discountPct: o.discountPct, registerName: r.name, shift: r.shift,
+        cashier: o.operator.name, actor: o.operator, dining: o.dining, source: "Counter",
+        onPaid: () => { o.status = "paid"; clearTimeout(o.timer); this.register.order = null; } });
+      if (!sale) fail(`You don't have enough ${CONFIG.currency.stat}`);
+      r.preview = null; r.flashUntil = Date.now() + 5000; r.flashNumber = sale.orderNumber; setTimeout(render, 5100);
       push(o.operator, "OrderUpdate", { orderId: o.id, status: "paid", sale });
-      push(p, "Receipt", sale);
-      return { status: "paid", receipt: sale.receipt };
+      return { status: "paid", receipt: sale.receipt, orderNumber: sale.orderNumber };
     }],
     "sales.recent": [ROLES.Cashier, function () { return this.sales.slice(0, 100); }],
     "sales.get": [ROLES.Cashier, function (p, receipt) {
@@ -721,6 +827,7 @@ const server = {
       this.wallets[sale.customer.key] += sale.total;
       if (restock) for (const l of sale.lines) { const prod = this.products[l.productId]; if (prod.stock != null) prod.stock += l.qty; }
       addRefund(this.today(), sale);
+      this.orders = this.orders.filter((t) => t.receipt !== sale.receipt);
       if (this.register.operator === p && this.register.shift) addRefund(this.register.shift.totals, sale);
       this.audit_(p, "refund", `${sale.receipt}: ${money(sale.total)} to ${sale.customer.name}${restock ? ", restocked" : ""}`);
       push(PEOPLE[sale.customer.key], "Toast", { text: `You were refunded ${money(sale.total)} for ${sale.receipt}`, kind: "success" });
@@ -752,9 +859,82 @@ const server = {
       return out;
     }],
     "audit.recent": [ROLES.Manager, function () { return this.audit.slice(0, 200); }],
+
+    "kiosk.start": [ROLES.Customer, function (p, id) {
+      const k = this.kiosks[id] ?? fail("Kiosk not found");
+      if (k.occupant && k.occupant !== p) fail("Someone else is using this kiosk");
+      for (const other of Object.values(this.kiosks)) if (other !== k && other.occupant === p) other.occupant = null;
+      k.occupant = p;
+      return { id, name: k.name, catalogue: this.catalogue(), balance: this.wallets[p.key] };
+    }],
+    "kiosk.cancel": [ROLES.Customer, function (p, id) { const k = this.kiosks[id]; if (k?.occupant === p) k.occupant = null; }],
+    "kiosk.checkout": [ROLES.Customer, function (p, id, cart, dining, expected) {
+      const k = this.kiosks[id] ?? fail("Kiosk not found");
+      if (k.occupant !== p) fail("This kiosk has been reset. Tap the screen to start again.");
+      const c = this.validateCart(cart);
+      if (CONFIG.orders.diningOptions.length && !CONFIG.orders.diningOptions.includes(dining)) fail("Choose where you would like to eat");
+      const totals = this.price(c, 0);
+      if (typeof expected === "number" && expected !== totals.total) fail("Prices have changed. Check your order and try again.");
+      const sale = this.complete({ customer: p, totals, discountPct: 0, registerName: k.name, shift: null, cashier: k.name,
+        actor: { name: k.name }, dining, source: "Kiosk", onPaid: () => { k.occupant = null; } });
+      if (!sale) fail(`You don't have enough ${CONFIG.currency.stat}`);
+      return sale;
+    }],
+
+    "orders.list": [ROLES.Customer, function () { return this.orders; }],
+    "orders.ready": [ROLES.Cashier, function (p, number) {
+      const t = this.orders.find((x) => x.number === number) ?? fail(`Order ${number} is not on the board`);
+      if (t.status === "ready") return;
+      t.status = "ready"; t.readyAt = Date.now();
+      const readyAt = t.readyAt;
+      this.audit_(p, "order.ready", `Order ${number} (${t.receipt})`);
+      push(PEOPLE[t.customerKey], "OrderReady", { number });
+      setTimeout(() => { if (t.status === "ready" && t.readyAt === readyAt) { this.orders = this.orders.filter((x) => x !== t); render(); } }, CONFIG.orders.readyClearAfter * 1000);
+    }],
+    "orders.recall": [ROLES.Cashier, function (p, number) {
+      const t = this.orders.find((x) => x.number === number) ?? fail(`Order ${number} is not on the board`);
+      t.status = "preparing"; t.readyAt = null;
+      this.audit_(p, "order.recall", `Order ${number} back to preparing`);
+    }],
+    "orders.collect": [ROLES.Cashier, function (p, number) {
+      const t = this.orders.find((x) => x.number === number) ?? fail(`Order ${number} is not on the board`);
+      this.orders = this.orders.filter((x) => x !== t);
+      this.audit_(p, "order.collected", `Order ${number} (${t.receipt})`);
+    }],
   },
 
   today() { return (this.days[dayKey(Date.now())] ??= newAggregate()); },
+
+  nextNumber() {
+    for (let i = 0; i < 999; i++) {
+      this.lastNumber = (this.lastNumber % 999) + 1;
+      if (!this.orders.some((t) => t.number === this.lastNumber)) return this.lastNumber;
+    }
+    return this.lastNumber;
+  },
+
+  // Same order as Checkout.complete in the Luau: take the money and the stock together, then record.
+  complete({ customer, totals, discountPct, registerName, shift, cashier, actor, dining, source, onPaid }) {
+    if (this.wallets[customer.key] < totals.total) return null;
+    this.wallets[customer.key] -= totals.total;
+    for (const l of totals.lines) { const prod = this.products[l.productId]; if (prod.stock != null) prod.stock = Math.max(0, prod.stock - l.qty); }
+    onPaid?.();
+    const sale = { receipt: `${CONFIG.store.prefix}-${String(++this.counter).padStart(6, "0")}`, t: Date.now(), registerName,
+      cashier: { name: cashier }, customer: { key: customer.key, name: customer.name },
+      lines: totals.lines.map((l) => ({ productId: l.productId, name: l.name, qty: l.qty, unitPrice: l.unitPrice, discount: l.discount, tax: l.tax, total: l.total })),
+      discountPct, subtotal: totals.subtotal, discount: totals.discount, tax: totals.tax, total: totals.total, refunded: null,
+      source, dining: dining || null, orderNumber: this.nextNumber() };
+    this.sales.unshift(sale);
+    if (shift) addSale(shift.totals, sale);
+    addSale(this.today(), sale);
+    for (const l of sale.lines) if (this.products[l.productId].tool) for (let i = 0; i < l.qty; i++) this.backpacks[customer.key].push(l.name);
+    this.orders.push({ number: sale.orderNumber, receipt: sale.receipt, source, dining: sale.dining, customer: customer.name, customerKey: customer.key,
+      lines: sale.lines.map((l) => ({ name: l.name, qty: l.qty })), status: "preparing", placedAt: Date.now() });
+    if (discountPct > 0) this.audit_(actor, "discount", `${sale.receipt}: ${discountPct}% (${money(sale.discount)} off)`);
+    this.audit_(actor, "sale", `${sale.receipt}: ${money(sale.total)} to ${customer.name} (${source})`);
+    push(customer, "Receipt", sale);
+    return sale;
+  },
 
   call(player, action, ...args) {
     const handler = this.handlers[action];
@@ -795,7 +975,12 @@ function seedDays() {
 const ui = {
   staff: "ann", tab: "sell", cart: [], discount: 0, customer: null, pending: null, category: "All", query: "",
   picker: null, phoneFor: "bob", incoming: {}, receiptFor: {}, reports: null,
+  dining: CONFIG.orders.diningOptions[0] ?? null,
+  kiosks: {}, // per kiosk: { step, dining, cart, category, done, user }
 };
+
+const DINING_ICONS = { "Eat in": "🍽", "Take away": "🛍" };
+const kioskState = (id) => (ui.kiosks[id] ??= { step: "start", dining: null, cart: [], category: CONFIG.categories[0], done: null, user: null });
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const me = () => PEOPLE[ui.staff];
@@ -809,7 +994,7 @@ function push(player, kind, payload) {
       if (!ui.pending || ui.pending.orderId !== u.orderId) return;
       ui.pending = null;
       if (u.status === "paid") {
-        toast(`Paid ${money(u.sale.total)} · ${u.sale.receipt}`, "success");
+        toast(`Paid ${money(u.sale.total)} · order ${u.sale.orderNumber}`, "success");
         ui.cart = []; ui.discount = 0; ui.customer = null;
         queueMicrotask(() => showReceipt(u.sale));
       } else toast(u.reason || "Payment was not completed", "warning");
@@ -817,6 +1002,7 @@ function push(player, kind, payload) {
     PaymentRequest(o) { ui.incoming[player.key] = o; ui.phoneFor = player.key; },
     PaymentClosed(p) { if (ui.incoming[player.key]?.id === p.orderId) { delete ui.incoming[player.key]; if (p.reason) toast(`${player.name}: ${p.reason}`, "warning"); } },
     Receipt(sale) { ui.receiptFor[player.key] = sale; },
+    OrderReady(o) { toast(`${player.name}: order ${o.number} is ready to collect!`, "success"); },
     Toast(t) { toast(`${player.name}: ${t.text}`, t.kind); },
   };
   handlers[kind]?.(payload);
@@ -882,6 +1068,171 @@ function render() {
   renderWindow();
   renderScreen();
   renderPhone();
+  renderOrderBoard();
+  renderKitchen();
+  renderMenu("#menuSnacks", "Snacks");
+  renderMenu("#menuGear", "Gear");
+  renderKiosk("K1");
+  renderKiosk("K2");
+}
+
+/* ---------------------------------------------------------------- world screens */
+
+function renderOrderBoard() {
+  const prep = server.orders.filter((t) => t.status !== "ready").map((t) => t.number);
+  const ready = server.orders.filter((t) => t.status === "ready").map((t) => t.number);
+  const nums = (list) => list.slice(0, 12).map((n) => `<span>${n}</span>`).join("");
+  $("#orderBoard").innerHTML = `<div class="board">
+    <div class="prep"><h4>Preparing</h4><div class="nums">${nums(prep)}</div></div>
+    <div class="ready"><h4>Ready</h4><div class="nums">${nums(ready)}</div></div></div>`;
+}
+
+function ageColour(ms) {
+  const s = ms / 1000, [a, b] = CONFIG.orders.lateAfter;
+  return s >= b ? "var(--danger)" : s >= a ? "var(--warning)" : "var(--success)";
+}
+const mmss = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${pad(s % 60)}`; };
+
+function renderKitchen() {
+  const prep = server.orders.filter((t) => t.status !== "ready");
+  const ready = server.orders.filter((t) => t.status === "ready");
+  const now = Date.now();
+  $("#kitchen").innerHTML = `<div class="kds">
+    <div class="top"><span>Kitchen</span><small>${prep.length} preparing · ${ready.length} ready</small></div>
+    <div class="tickets">${prep.slice(0, 3).map((t) => `<div class="ticket">
+        <div class="th" style="background:${ageColour(now - t.placedAt)}"><span>#${t.number}</span><small data-age="${t.placedAt}">${mmss(now - t.placedAt)}</small></div>
+        <div class="tl">${t.lines.map((l) => `${l.qty} × ${esc(l.name)}`).join("<br>")}<small>${esc(t.source)}${t.dining ? " · " + esc(t.dining) : ""}</small></div>
+        <button type="button" data-ready="${t.number}">Ready</button></div>`).join("") || `<div class="empty-k">No orders waiting</div>`}</div>
+    <div class="readybar">Ready ${ready.slice(0, 5).map((t) => `<span class="chip">#${t.number} <button type="button" data-collect="${t.number}">Collected</button><button type="button" data-recall="${t.number}">Recall</button></span>`).join("")}</div>
+  </div>`;
+}
+
+function renderMenu(sel, category) {
+  const items = server.catalogue().filter((p) => p.active && p.category === category);
+  const el = $(sel);
+  el.innerHTML = `<div class="menu"><h4>${esc(category)}</h4><div class="rule"></div>
+    <div class="items" style="--cols:${items.length > 4 ? 3 : 2}">${items.map((p) => {
+      const out = p.stock != null && p.stock <= 0;
+      return `<div class="item ${out ? "out" : ""}"><i style="background:${p.colour};opacity:${out ? .4 : 1}">${esc(p.name[0])}</i>${esc(p.name)}<b>${out ? "Sold out" : money(p.price)}</b></div>`;
+    }).join("")}</div></div>`;
+}
+
+// The till's customer screen: "Your order" with each line, like the big wall display in game.
+function renderScreen() {
+  const r = server.register;
+  const head = (strip) => `<div class="sc-strip" style="background:${strip}"></div><div class="sc-head">${esc(CONFIG.store.name)}<small>${esc(r.name)}</small></div>`;
+  const lineList = (lines) => `<div class="lines">${lines.slice(0, 7).map((l) => `<div><span>${l.qty} × ${esc(l.name)}</span><span>${money(l.total)}</span></div>`).join("")}${lines.length > 7 ? `<div><span>+ ${lines.length - 7} more</span></div>` : ""}</div>`;
+  let html;
+  if (Date.now() < r.flashUntil) {
+    html = head("var(--success)") + `<div class="status">Thank you!</div><div class="detail">Watch the board for your number</div><div class="big-num">${r.flashNumber ?? "✓"}</div><div style="flex:1"></div><div class="bar ok"><span>Your order number</span><b>${r.flashNumber ? "Order " + r.flashNumber : ""}</b></div>`;
+  } else if (r.order) {
+    const lines = r.order.totals.lines.map((l) => ({ name: l.name, qty: l.qty, total: l.unitPrice * l.qty }));
+    html = head("var(--warning)") + `<div class="status">Please approve</div>${lineList(lines)}<div class="bar"><span>Approve on your screen</span><b>${money(r.order.totals.total)}</b></div>`;
+  } else if (r.operator && r.preview?.items) {
+    html = head("var(--accent)") + `<div class="status">Your order</div>${lineList(r.preview.lines)}<div class="bar"><span>${r.preview.discount ? `Total (${money(r.preview.discount)} off)` : "Total"}</span><b>${money(r.preview.total)}</b></div>`;
+  } else if (r.operator && r.shift) {
+    html = head("var(--accent)") + `<div class="status" style="margin-top:1.5em">Welcome!</div><div class="detail">${esc(r.operator.name)} can take your order</div>`;
+  } else if (r.shift) {
+    html = head("var(--faint)") + `<div class="status" style="margin-top:1.5em">Back soon</div><div class="detail">Waiting for a cashier</div>`;
+  } else {
+    html = head("var(--faint)") + `<div class="status" style="margin-top:1.5em">Closed</div><div class="detail">${esc(r.name)}</div>`;
+  }
+  $("#screen").innerHTML = `<div class="your">${html}</div>`;
+}
+
+/* ---------------------------------------------------------------- kiosks */
+
+function kioskTotals(k) {
+  const lines = k.cart.filter((l) => server.products[l.productId]?.active).map((l) => {
+    const p = server.products[l.productId];
+    return { productId: p.id, name: p.name, unitPrice: p.price, qty: l.qty, taxRate: CONFIG.tax.enabled ? p.taxRate : 0 };
+  });
+  return priceLines(lines, { discountPct: 0, taxInclusive: CONFIG.tax.inclusive });
+}
+
+function renderKiosk(id) {
+  const k = kioskState(id);
+  const occupant = server.kiosks[id].occupant;
+  const el = $(`#kiosk-${id}`);
+  const customer = PEOPLE[ui.phoneFor];
+  // Someone else is using it: everyone else sees "Someone is ordering".
+  if (occupant && occupant !== customer && k.step !== "done") {
+    el.innerHTML = `<div class="k-hero"><b>${esc(CONFIG.store.name)}</b>Order and pay here</div>
+      <div class="k-body"><b style="font-size:1.4em">Someone is ordering</b><span style="color:var(--muted)">${esc(occupant.name)} is using this kiosk</span></div>`;
+    return;
+  }
+  const top = (title) => `<div class="k-top"><span>${esc(CONFIG.store.name)}<small>${esc(title)}</small></span><button type="button" data-k="${id}" data-kact="cancel">Cancel</button></div>`;
+  if (k.step === "start") {
+    el.innerHTML = `<div class="k-hero"><b>${esc(CONFIG.store.name)}</b>Order and pay here</div>
+      <div class="k-body"><button type="button" class="k-btn pulse" data-k="${id}" data-kact="start">Touch to start</button>
+      <small style="color:var(--faint)">${esc(customer.name)} · pay with ${CONFIG.currency.stat}</small></div>`;
+  } else if (k.step === "dining") {
+    el.innerHTML = top("Step 1 of 3") + `<div class="k-body"><b style="font-size:1.5em">Where would you like to eat?</b>
+      <div class="k-dine">${CONFIG.orders.diningOptions.map((o) => `<button type="button" data-k="${id}" data-kdine="${esc(o)}"><span>${DINING_ICONS[o] ?? "•"}</span>${esc(o)}</button>`).join("")}</div></div>`;
+  } else if (k.step === "menu") {
+    const t = kioskTotals(k);
+    const items = t.lines.reduce((n, l) => n + l.qty, 0);
+    el.innerHTML = top(`${k.dining ? k.dining + " · " : ""}Choose your items`) + `<div class="k-menu">
+      <div class="k-cats">${CONFIG.categories.map((c) => `<button type="button" data-k="${id}" data-kcat="${esc(c)}" aria-pressed="${k.category === c}">${esc(c)}</button>`).join("")}</div>
+      <div class="k-grid">${server.catalogue().filter((p) => p.active && p.category === k.category).map((p) => {
+        const q = k.cart.find((l) => l.productId === p.id)?.qty ?? 0;
+        const out = p.stock != null && p.stock <= 0;
+        return `<button type="button" class="k-item ${q ? "in" : ""}" data-k="${id}" data-kadd="${p.id}" ${out ? "disabled" : ""}>
+          ${q ? `<span class="q">×${q}</span>` : ""}<i style="background:${p.colour};opacity:${out ? .4 : 1}">${esc(p.name[0])}</i>${esc(p.name)}<b>${out ? "Sold out" : money(p.price)}</b></button>`;
+      }).join("")}</div></div>
+      <div class="k-foot"><span><small>${items ? `Your order · ${items} item${items === 1 ? "" : "s"}` : "Your order is empty"}</small><b>${money(t.total)}</b></span>
+      <button type="button" class="k-btn" data-k="${id}" data-kact="basket" ${items ? "" : "disabled"}>View order</button></div>`;
+  } else if (k.step === "basket") {
+    const t = kioskTotals(k);
+    const wallet = server.wallets[customer.key];
+    const enough = wallet >= t.total;
+    el.innerHTML = top("Step 3 of 3 · Check your order") + `<div class="k-lines">${t.lines.map((l) => `<div class="k-line">
+        <span>${esc(l.name)}<small>${money(l.unitPrice)} each</small></span>
+        <span class="st"><button type="button" data-k="${id}" data-kstep="${l.productId}" data-by="-1">−</button>${l.qty}<button type="button" data-k="${id}" data-kstep="${l.productId}" data-by="1">+</button></span>
+        <b>${money(l.unitPrice * l.qty)}</b></div>`).join("")}</div>
+      <div class="k-total"><div class="row total"><span>Total</span><span class="money">${money(t.total)}</span></div>
+        <small style="color:${enough ? "var(--muted)" : "var(--danger)"}">Your ${CONFIG.currency.stat}: ${money(wallet)} → ${money(wallet - t.total)}</small>
+        <div class="acts"><button type="button" class="k-btn alt" data-k="${id}" data-kact="menu">Add more</button>
+        <button type="button" class="k-btn go" data-k="${id}" data-kact="pay" ${enough ? "" : "disabled"}>${enough ? "Pay " + money(t.total) : "Not enough " + CONFIG.currency.stat}</button></div></div>`;
+  } else if (k.step === "done") {
+    const sale = k.done;
+    el.innerHTML = `<div class="k-done"><span>✓</span>Thank you, ${esc(sale.customer.name)}!</div>
+      <div class="k-body"><span style="color:var(--muted)">Your order number</span><span class="k-num">${sale.orderNumber}</span>
+      <small style="color:var(--muted)">${sale.dining ? esc(sale.dining) + " · " : ""}Watch the board for your number</small>
+      <button type="button" class="k-btn" data-k="${id}" data-kact="reset">Done</button></div>`;
+  }
+}
+
+function kioskAction(id, d) {
+  const k = kioskState(id);
+  const customer = PEOPLE[ui.phoneFor];
+  const kcall = (action, ...args) => {
+    const res = server.call(customer, action, ...args);
+    if (!res.ok) toast(`${customer.name}: ${res.error}`, "error");
+    return res;
+  };
+  const reset = () => Object.assign(k, { step: "start", dining: null, cart: [], category: CONFIG.categories[0], done: null, user: null });
+  k.lastTap = Date.now();
+  if (d.kact === "start") {
+    if (kcall("kiosk.start", id).ok) { k.user = customer.key; k.step = CONFIG.orders.diningOptions.length ? "dining" : "menu"; }
+  } else if (d.kact === "cancel") { kcall("kiosk.cancel", id); reset(); }
+  else if (d.kact === "reset") reset();
+  else if (d.kact === "basket" || d.kact === "menu") k.step = d.kact;
+  else if (d.kact === "pay") {
+    const res = kcall("kiosk.checkout", id, k.cart, k.dining, kioskTotals(k).total);
+    if (res.ok) { k.done = res.data; k.step = "done"; const done = k.done; setTimeout(() => { if (k.done === done && k.step === "done") { reset(); render(); } }, 12000); }
+  } else if (d.kdine) { k.dining = d.kdine; k.step = "menu"; }
+  else if (d.kcat) k.category = d.kcat;
+  else if (d.kadd || d.kstep) {
+    const pid = d.kadd || d.kstep;
+    const p = server.products[pid];
+    const line = k.cart.find((l) => l.productId === pid);
+    const qty = (line?.qty ?? 0) + (d.kadd ? 1 : Number(d.by));
+    if (p.stock != null && qty > p.stock) return toast(`Only ${p.stock} ${p.name} left`, "warning");
+    if (line) { if (qty <= 0) k.cart = k.cart.filter((l) => l !== line); else line.qty = qty; }
+    else if (qty > 0) k.cart.push({ productId: pid, qty });
+    if (k.step === "basket" && !k.cart.length) k.step = "menu";
+  }
 }
 
 function renderStaffSeg() {
@@ -890,7 +1241,7 @@ function renderStaffSeg() {
 }
 
 function tabsFor(role) {
-  const tabs = [["sell", "🛒 Sell"], ["sales", "🧾 Sales"], ["shift", "⏱ Shift"]];
+  const tabs = [["sell", "🛒 Sell"], ["orders", "🔔 Orders"], ["sales", "🧾 Sales"], ["shift", "⏱ Shift"]];
   if (role >= ROLES.Manager) tabs.push(["products", "📦 Products"], ["reports", "📊 Reports"], ["audit", "📜 Audit log"]);
   return tabs;
 }
@@ -920,7 +1271,7 @@ function renderWindow() {
       <button class="btn ghost small" data-action="leave" type="button" aria-label="Leave register">✕</button>
     </div>
     <nav class="tabs" role="tablist">${tabsFor(me().role).map(([id, label]) => `<button type="button" role="tab" data-tab="${id}" aria-selected="${ui.tab === id}">${label}</button>`).join("")}</nav>
-    <div class="content">${({ sell: viewSell, sales: viewSales, shift: viewShift, products: viewProducts, reports: viewReports, audit: viewAudit })[ui.tab]()}</div>`;
+    <div class="content">${({ sell: viewSell, orders: viewOrders, sales: viewSales, shift: viewShift, products: viewProducts, reports: viewReports, audit: viewAudit })[ui.tab]()}</div>`;
   const search = $("#search");
   if (search && ui.focusSearch) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); ui.focusSearch = false; }
 }
@@ -962,6 +1313,7 @@ function viewSell() {
     <div class="order">
       <div class="order-head"><h3>Current order</h3><button type="button" class="btn ghost small" data-action="clear">Clear</button></div>
       <button type="button" class="btn customer-btn" data-action="picker" style="color:${ui.customer ? "var(--text)" : "var(--muted)"}">👤&nbsp; ${ui.customer ? esc(PEOPLE[ui.customer].name) : "Choose customer ▾"}</button>
+      ${CONFIG.orders.diningOptions.length ? `<div class="discounts">${CONFIG.orders.diningOptions.map((o) => `<button type="button" class="btn" style="flex:1;border-radius:999px" data-dining="${esc(o)}" aria-pressed="${ui.dining === o}">${esc(o)}</button>`).join("")}</div>` : ""}
       ${ui.picker ? `<div class="picker">${ui.picker.map((c) => `<button type="button" data-customer="${c.key}" ${c.near ? "" : 'style="opacity:.6"'}><span>${esc(c.name)} · @${c.key}</span><small>${c.near ? `${c.distance} studs` : "away from the counter"}</small></button>`).join("")}</div>` : ""}
       <div class="lines">${totals.lines.length ? totals.lines.map((l) => `<div class="line">
           <span class="bar" style="background:${server.products[l.productId].colour}"></span>
@@ -988,6 +1340,19 @@ function viewSell() {
       </div>` : ""}
     </div>
   </div>`;
+}
+
+function viewOrders() {
+  const list = server.orders;
+  return `<div class="toolbar"><h2>Orders</h2><span style="color:var(--muted);font-size:14px">Mark orders ready when they are made, and collected when the customer has them.</span></div>
+    <div class="list">${list.map((t) => `<div class="product-row" style="grid-template-columns:70px minmax(0,1fr) 110px auto">
+      <b style="font-size:22px;color:${t.status === "ready" ? "var(--success)" : "var(--text)"}">#${t.number}</b>
+      <span style="min-width:0"><b>${t.lines.map((l) => `${l.qty} × ${esc(l.name)}`).join(", ")}</b><small>${esc(t.customer)} · ${esc(t.source)}${t.dining ? " · " + esc(t.dining) : ""} · ${Math.floor((Date.now() - t.placedAt) / 60000)} min</small></span>
+      ${t.status === "ready" ? `<span class="pill ok">Ready</span>` : `<span class="pill info">Preparing</span>`}
+      <span style="display:flex;gap:8px;justify-content:flex-end">${t.status === "ready"
+        ? `<button type="button" class="btn ghost" data-recall="${t.number}">Recall</button><button type="button" class="btn primary" data-collect="${t.number}">Collected</button>`
+        : `<button type="button" class="btn success" data-ready="${t.number}">Ready</button>`}</span>
+    </div>`).join("") || `<p class="empty">No orders waiting. Sell something, or order on a kiosk.</p>`}</div>`;
 }
 
 function viewSales() {
@@ -1077,20 +1442,6 @@ function viewAudit() {
       <time>${dateTime(e.t)}</time><b>${esc(e.actor)}</b><span class="pill ${tag[e.action] ?? ""}">${esc(e.action)}</span><span>${esc(e.detail)}</span></div>`).join("") || `<p class="empty">Nothing logged yet</p>`}</div>`;
 }
 
-function renderScreen() {
-  const r = server.register;
-  let status, detail, amount = "", accent;
-  if (Date.now() < r.flashUntil) { status = "Thank you!"; detail = "Payment approved"; amount = "✓"; accent = "var(--success)"; }
-  else if (r.order) { status = "Please approve"; detail = `Waiting for ${r.order.customer.name}`; amount = money(r.order.totals.total); accent = "var(--warning)"; }
-  else if (r.operator && r.preview?.items) { status = `${r.preview.items} item${r.preview.items === 1 ? "" : "s"}`; detail = `Served by ${r.operator.name}`; amount = money(r.preview.total); accent = "var(--accent)"; }
-  else if (r.operator && r.shift) { status = "Welcome!"; detail = `${r.operator.name} can take your order`; accent = "var(--accent)"; }
-  else if (r.shift) { status = "Back soon"; detail = "Waiting for a cashier"; accent = "var(--faint)"; }
-  else { status = "Closed"; detail = r.name; accent = "var(--faint)"; }
-  const screen = $("#screen");
-  screen.style.setProperty("--screen-accent", accent);
-  screen.innerHTML = `<span class="store">${esc(CONFIG.store.name.toUpperCase())}</span><span class="status">${esc(status)}</span><span class="detail">${esc(detail)}</span><span class="amount money">${esc(amount)}</span>`;
-}
-
 function renderPhone() {
   const key = ui.phoneFor;
   const person = PEOPLE[key];
@@ -1140,7 +1491,8 @@ function receiptText(sale) {
   const rule = "-".repeat(34);
   const center = (s) => " ".repeat(Math.max(0, Math.floor((34 - s.length) / 2))) + s;
   const lines = [`<b>${esc(center(CONFIG.store.name.toUpperCase()))}</b>`, esc(center(sale.registerName)), rule,
-    row("Receipt", sale.receipt), row("Date", dateTime(sale.t)), row("Cashier", sale.cashier.name), row("Customer", sale.customer.name), rule,
+    row("Receipt", sale.receipt), ...(sale.orderNumber ? [`<b>${row("ORDER", "#" + sale.orderNumber)}</b>`] : []), ...(sale.dining ? [row("Dining", sale.dining)] : []),
+    row("Date", dateTime(sale.t)), row(sale.source === "Kiosk" ? "Kiosk" : "Cashier", sale.cashier.name), row("Customer", sale.customer.name), rule,
     ...sale.lines.map((l) => esc(row(`${l.qty} x ${l.name}`, money(l.unitPrice * l.qty)))), rule, row("Subtotal", money(sale.subtotal))];
   if (sale.discount) lines.push(row(`Discount ${sale.discountPct}%`, "-" + money(sale.discount)));
   lines.push(`<b>${row("TOTAL", money(sale.total))}</b>`);
@@ -1187,7 +1539,12 @@ document.addEventListener("click", (e) => {
   if (!t || t.closest("#dialogRoot")) return;
   const d = t.dataset;
 
-  if (d.staff) { ui.staff = d.staff; ui.cart = []; ui.discount = 0; ui.customer = null; ui.picker = null; ui.pending = null; }
+  if (d.k) kioskAction(d.k, d);
+  else if (d.ready) call("orders.ready", Number(d.ready));
+  else if (d.collect) call("orders.collect", Number(d.collect));
+  else if (d.recall) call("orders.recall", Number(d.recall));
+  else if (d.dining) ui.dining = d.dining;
+  else if (d.staff) { ui.staff = d.staff; ui.cart = []; ui.discount = 0; ui.customer = null; ui.picker = null; ui.pending = null; }
   else if (d.tab) { ui.tab = d.tab; ui.picker = null; }
   else if (d.category) ui.category = d.category;
   else if (d.add) { if (!ui.pending) setQty(d.add, qtyIn(d.add) + 1); }
@@ -1213,7 +1570,7 @@ document.addEventListener("click", (e) => {
     picker: () => { if (!ui.pending) ui.picker = ui.picker ? null : call("register.customers").data; },
     "go-shift": () => { ui.tab = "shift"; },
     charge: () => {
-      const res = call("checkout.start", ui.cart, ui.discount, ui.customer);
+      const res = call("checkout.start", ui.cart, ui.discount, ui.customer, ui.dining);
       if (res.ok) ui.pending = { orderId: res.data.orderId, customer: res.data.customer, total: res.data.total, expiresAt: res.data.expiresAt };
     },
     cancel: () => ui.pending && call("checkout.cancel", ui.pending.orderId),
@@ -1255,10 +1612,32 @@ $("#resetBtn").addEventListener("click", () => {
 });
 $("#clearLog").addEventListener("click", () => { $("#log").innerHTML = ""; });
 
+setInterval(() => {
+  const now = Date.now();
+  document.querySelectorAll("[data-age]").forEach((el) => {
+    const age = now - Number(el.dataset.age);
+    el.textContent = mmss(age);
+    el.parentElement.style.background = ageColour(age);
+  });
+  for (const [id, k] of Object.entries(ui.kiosks)) {
+    if (!["start", "done"].includes(k.step) && now - (k.lastTap ?? now) > CONFIG.kiosk.idleTimeout * 1000) {
+      const user = server.kiosks[id].occupant;
+      if (user) server.call(user, "kiosk.cancel", id);
+      Object.assign(k, { step: "start", dining: null, cart: [], done: null });
+      toast("The kiosk timed out", "info");
+      render();
+    }
+  }
+}, 1000);
+
 // Opens in a working state: Ann at the register with a shift open and an order in progress.
 server.reset();
 server.call(PEOPLE.ann, "register.use");
 server.call(PEOPLE.ann, "shift.open");
+// Eve has just ordered on the white kiosk, so the board and the kitchen show a live ticket.
+server.call(PEOPLE.eve, "kiosk.start", "K2");
+server.call(PEOPLE.eve, "kiosk.checkout", "K2", [{ productId: "cheezburger", qty: 1 }, { productId: "bloxycola", qty: 1 }], "Eat in", 8);
+ui.receiptFor = {};
 ui.cart = [{ productId: "bloxycola", qty: 2 }, { productId: "pizza", qty: 1 }];
 ui.customer = "bob";
 sendPreview();

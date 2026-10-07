@@ -10,6 +10,8 @@ local Api = require(script.Api)
 local App = require(script.App)
 local PaymentPrompt = require(script.PaymentPrompt)
 local State = require(script.State)
+local Kiosk = require(script.World.Kiosk)
+local Kitchen = require(script.World.Kitchen)
 local Toasts = require(script.UI.Toasts)
 
 local hello
@@ -32,9 +34,12 @@ State.maxDiscount = hello.maxDiscount
 State.persistent = hello.persistent
 State.set("catalogue", hello.catalogue or {})
 State.register = hello.register
+State.orders = hello.orders or {}
 
 App.mount()
 PaymentPrompt.mount(App.overlay() :: any)
+Kiosk.mount()
+Kitchen.mount()
 
 Api.on("OpenRegister", function(summary)
 	State.set("register", summary)
@@ -55,6 +60,14 @@ end)
 
 Api.on("Catalogue", function(list)
 	State.set("catalogue", list)
+end)
+
+Api.on("Orders", function(list)
+	State.set("orders", list)
+end)
+
+Api.on("OrderReady", function(payload)
+	Toasts.show(string.format("Order %d is ready to collect!", payload.number), "success")
 end)
 
 Api.on("Toast", function(toast)

@@ -11,6 +11,8 @@ local Api = require(Services.Api)
 local Audit = require(Services.Audit)
 local Catalogue = require(Services.Catalogue)
 local Checkout = require(Services.Checkout)
+local Kiosks = require(Services.Kiosks)
+local Orders = require(Services.Orders)
 local Registers = require(Services.Registers)
 local Reports = require(Services.Reports)
 local Sales = require(Services.Sales)
@@ -51,7 +53,8 @@ Api.handle("session.hello", Customer, function(player)
 		roleName = Roles.name(role),
 		maxDiscount = Staff.maxDiscount(player),
 		persistent = Store.persistent,
-		catalogue = if role >= Cashier then Catalogue.list() else nil,
+		catalogue = Catalogue.list(),
+		orders = Orders.list(),
 		register = if register then Registers.summary(register) else nil,
 	}
 end)
@@ -81,7 +84,14 @@ Api.handle("register.preview", Cashier, function(player, rawCart, rawDiscount)
 			for _, line in cart do
 				items += line.qty
 			end
-			register.preview = { items = items, total = totals.total }
+			local lines = {}
+			for _, line in totals.lines do
+				table.insert(
+					lines,
+					{ name = line.name or line.productId, qty = line.qty, total = line.unitPrice * line.qty }
+				)
+			end
+			register.preview = { items = items, total = totals.total, discount = totals.discount, lines = lines }
 		end
 	end
 	Registers.updateDisplay(register)
@@ -150,8 +160,8 @@ end)
 
 -- Checkout -------------------------------------------------------------------------------
 
-Api.handle("checkout.start", Cashier, function(player, cart, discount, customerId)
-	return Checkout.start(player, myRegister(player), cart, discount, customerId)
+Api.handle("checkout.start", Cashier, function(player, cart, discount, customerId, dining)
+	return Checkout.start(player, myRegister(player), cart, discount, customerId, dining)
 end)
 
 Api.handle("checkout.cancel", Cashier, function(player, orderId)
@@ -204,6 +214,7 @@ Api.handle("sales.refund", Manager, function(player, receipt, restock)
 		end
 	end
 	Reports.recordRefund(sale, os.time())
+	Orders.cancelReceipt(sale.receipt)
 	local register = Registers.of(player)
 	if register and register.shift then
 		Shifts.recordRefund(register.shift, sale)
@@ -274,10 +285,56 @@ Api.handle("audit.recent", Manager, function(_player, limit)
 	return Audit.recent(Validate.int(limit, 1, 500) or 100)
 end)
 
--- Keep every staff screen in step with the catalogue.
+-- Kiosks (customers) ---------------------------------------------------------------------
+
+Api.handle("kiosk.start", Customer, function(player, id)
+	return Kiosks.start(player, id)
+end)
+
+Api.handle("kiosk.ping", Customer, function(player, id)
+	Kiosks.ping(player, id)
+end)
+
+Api.handle("kiosk.cancel", Customer, function(player, id)
+	Kiosks.cancel(player, id)
+end)
+
+Api.handle("kiosk.checkout", Customer, function(player, id, cart, dining, expectedTotal)
+	return Kiosks.checkout(player, id, cart, dining, expectedTotal)
+end)
+
+-- Orders (kitchen display and the Orders tab) --------------------------------------------
+
+local function orderNumber(raw: any): number
+	local number = Validate.int(raw, 1, 999)
+	if not number then
+		Api.fail("Invalid order number")
+	end
+	return number
+end
+
+local function orderAction(fn: (number, Player) -> (boolean, string?))
+	return function(player, raw)
+		local ok, problem = fn(orderNumber(raw), player)
+		if not ok then
+			Api.fail(problem or "That order is not on the board")
+		end
+	end
+end
+
+Api.handle("orders.list", Customer, function()
+	return Orders.list()
+end)
+Api.handle("orders.ready", Cashier, orderAction(Orders.markReady))
+Api.handle("orders.recall", Cashier, orderAction(Orders.recall))
+Api.handle("orders.collect", Cashier, orderAction(Orders.collect))
+
+-- Keep every screen in step with the catalogue. Menus, kiosks and tills all show it.
 Catalogue.changed:Connect(function()
 	local snapshot = Catalogue.list()
-	Api.pushWhere(Staff.isStaff, "Catalogue", snapshot)
+	Api.pushWhere(function()
+		return true
+	end, "Catalogue", snapshot)
 end)
 
 return {}

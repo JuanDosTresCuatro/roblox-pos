@@ -184,12 +184,25 @@ local UDim2 = {
 	end,
 }
 
-local Vector2mt = typed("Vector2")
-local Vector2 = {
-	new = function(x, y)
-		return setmetatable({ X = x or 0, Y = y or 0 }, Vector2mt)
+local Vector2mt
+local function v2(x: number?, y: number?)
+	return setmetatable({ X = x or 0, Y = y or 0 }, Vector2mt)
+end
+Vector2mt = typed("Vector2", {
+	__mul = function(a, b)
+		if type(a) == "number" then
+			a, b = b, a
+		end
+		if type(b) == "number" then
+			return v2(a.X * b, a.Y * b)
+		end
+		return v2(a.X * b.X, a.Y * b.Y)
 	end,
-}
+	__add = function(a, b)
+		return v2(a.X + b.X, a.Y + b.Y)
+	end,
+})
+local Vector2 = { new = v2 }
 Vector2.zero = Vector2.new()
 
 local function stub(name: string)

@@ -1,6 +1,15 @@
 # RoPOS
 
-A point of sale system for Roblox games. Staff ring up orders at a till, the customer approves the payment on their own screen, the money moves, stock goes down and the items appear in the customer's backpack. Managers get shift reports, refunds, price and stock control, 7-day reports and an audit log.
+A complete restaurant and shop system for Roblox games:
+
+- **Till:** staff ring up orders. The customer approves the payment on their own screen, and a big "Your order" screen shows each item as it's added.
+- **Self-order kiosks:** customers walk up, choose eat in or take away, tap their items and pay. They get an order number.
+- **Kitchen display:** every order appears as a ticket with a timer. Staff tap **Ready** when it's made.
+- **Order status board:** order numbers move from **Preparing** to **Ready**, and the customer gets a "your order is ready" alert.
+- **Menu boards:** live prices on the wall, with sold-out items marked.
+- **Back office:** shift reports, refunds, price and stock control, 7-day reports and an audit log.
+
+Money, stock and sales are saved and shared across every server of your game.
 
 The demo shop, **Blox Mart**, sells classic Roblox items (Bloxy Cola, Gravity Coil, Linked Sword, Golden Crown and more), priced in pounds (£).
 
@@ -24,15 +33,31 @@ No Roblox Studio to hand? Download [`RoPOS-Simulator.html`](https://github.com/J
 ## Try the demo
 
 1. Open **`RoPOS.rbxlx`** (double-click it, or in Studio choose **File > Open from File**).
-2. Press **Play** (F5). A Blox Mart counter appears in front of you.
-3. Walk round to the back of the counter and hold **E** on the till. The POS window opens.
-4. Go to the **Shift** tab and press **Open shift**.
-5. Go to the **Sell** tab and tap some items to add them to the order.
-6. Press **Choose customer** and pick yourself.
-7. Press **Charge**.
-8. Your payment screen pops up. Press **Pay**.
+2. Press **Play** (F5). The Blox Mart restaurant appears in front of you: a wall of screens, a counter with a till, and 2 self-order kiosks on the right.
 
-The items appear in your backpack and your Cash (top right of the screen) goes down. A receipt pops up.
+**Order at a kiosk (as a customer):**
+
+1. Walk up to a kiosk and click **Touch to start** on its screen.
+2. Choose **Eat in** or **Take away**.
+3. Tap a category on the left, then tap items to add them.
+4. Press **View order**, then **Pay**.
+
+You get an order number. It appears under **Preparing** on the order board and as a ticket on the kitchen display.
+
+**Make the order (as staff):**
+
+5. Click **Ready** on the order's ticket on the kitchen display. The number moves to **Ready** on the board and you get a "your order is ready" alert.
+6. Click **Collected** in the Ready strip at the bottom of the kitchen display.
+
+**Sell at the till (as staff):**
+
+1. Walk round to the back of the counter and hold **E** on the till. The POS window opens.
+2. Go to the **Shift** tab and press **Open shift**.
+3. Go to the **Sell** tab, choose **Eat in** or **Take away**, and tap some items. The big "Your order" screen on the wall lists them.
+4. Press **Choose customer**, pick yourself, then press **Charge**.
+5. Your payment screen pops up. Press **Pay**.
+
+The items appear in your backpack and your Cash (top right of the screen) goes down. A receipt pops up and the order goes to the kitchen like a kiosk order.
 
 In Studio, everyone is a manager and you can charge yourself, so you can try everything on your own. To try it with a separate cashier and customer, go to **Test > Clients and Servers**, choose 2 players and press **Start**.
 
@@ -42,7 +67,7 @@ In Studio, everyone is a manager and you can charge yourself, so you can try eve
 2. In the **Explorer** panel, right-click **ReplicatedStorage**, choose **Insert from File...** and pick `Models/POS.rbxmx`.
 3. Right-click **ServerScriptService**, choose **Insert from File...** and pick `Models/POSServer.rbxmx`.
 4. Open **StarterPlayer**, right-click **StarterPlayerScripts**, choose **Insert from File...** and pick `Models/POSClient.rbxmx`.
-5. Press **Play**. If your game has no till yet, RoPOS builds a demo counter so you can check it works.
+5. Press **Play**. If your game has no till yet, RoPOS builds the demo restaurant so you can check it works.
 
 Keep the names `POS`, `POSServer` and `POSClient` exactly as they are. The scripts find each other by name.
 
@@ -94,6 +119,22 @@ Players start with £100 in a saved `Cash` value, shown on the leaderboard. To c
 
 - `StartingBalance`: how much new players get.
 - `Provider = "Leaderstats"`: use money your game already has. Set `StatName` to the name of your leaderstats value (for example `"Coins"`). RoPOS then leaves saving that value to your game.
+
+### Your own equipment
+
+Every piece of equipment is a Model (or a single Part) with a **tag**. To add one: select it, and in the **Properties** panel under **Tags**, add the tag from this table. You can have as many of each as you like.
+
+| Equipment | Tag | What it needs |
+| --- | --- | --- |
+| Till | `POSRegister` | Any parts. Optional: a Part named `Screen` for the customer's "Your order" screen |
+| Self-order kiosk | `POSKiosk` | A Part named `Screen`: its front face becomes the touchscreen. Make it taller than it is wide |
+| Kitchen display | `POSKitchenDisplay` | A Part named `Screen` (or tag the Part itself), facing the staff |
+| Order status board | `POSOrderBoard` | A Part named `Screen` (or tag the Part itself), facing the customers |
+| Menu board | `POSMenuBoard` | A Part named `Screen`. Optional attribute `Category` (for example `Gear`) to show just that category |
+
+A screen is drawn on the Part's **front** face. If yours shows on the wrong side, rotate the Part 180°.
+
+When your equipment is in place, set `Config.Demo.SpawnRegister = false` so the demo restaurant isn't built.
 
 ### Your own till
 
@@ -148,6 +189,10 @@ Until then, the POS window shows **Studio: data not saved** and everything reset
 | See the last 7 days (managers) | **Reports** tab |
 | See who did what (managers) | **Audit log** tab |
 | Leave the till | Press **✕**, press Esc, or walk away |
+| Eat in or take away | Choose it above the order on the **Sell** tab |
+| Mark an order made | **Ready** on the kitchen display, or the **Orders** tab |
+| Hand an order over | **Collected** on the kitchen display or the **Orders** tab. Ready orders also clear after 2 minutes |
+| Put an order back to preparing | **Recall** on the kitchen display or the **Orders** tab |
 
 ## If something doesn't work
 
@@ -157,6 +202,10 @@ Until then, the POS window shows **Studio: data not saved** and everything reset
 | "needs to stand at the register" | The customer must be within 16 studs (about 4.5 m) of the till |
 | The POS window closes by itself | The cashier walked more than 20 studs (about 5.6 m) from the till |
 | "You don't have enough Cash" | The customer can't afford it. The cashier presses **Cancel payment**, removes some items and charges again |
+| A kiosk says "Step closer" | Stand within about 3 m of the kiosk |
+| A kiosk says "Someone is ordering" | Another player is using it. It frees itself when they walk away or stop tapping for 60 seconds |
+| Kitchen display has no buttons | Only cashiers and managers see **Ready**, **Collected** and **Recall** |
+| A screen is on the wrong side | Screens use the Part's front face. Rotate the Part 180° |
 | "Prices or stock changed" | A manager changed a price, or an item sold out, while the customer was deciding. Charge again |
 | Customers don't get items | Check the Tool in **ServerStorage > POSItems** has exactly the same name as the product's `Tool` setting |
 | Data resets between tests | See [Saving](#saving) |
@@ -167,6 +216,7 @@ Until then, the POS window shows **Studio: data not saved** and everything reset
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `Store.Name`, `ReceiptPrefix`, `Footer` | Blox Mart, `BM` | Shown on the screens and receipts |
+| Colours | white and yellow | Edit `ReplicatedStorage > POS > Palette` to rebrand every screen at once |
 | `Currency.Provider` | `"Builtin"` | `"Leaderstats"` uses money your game already creates and saves |
 | `Currency.StatName`, `Symbol`, `StartingBalance` | `Cash`, `£`, 100 | Prices and balances are whole pounds |
 | `Tax.Enabled`, `Name`, `Inclusive` | off, `VAT`, inclusive | Each product's `TaxRate` is a percentage (20 = UK standard rate) |
@@ -180,8 +230,14 @@ Until then, the POS window shows **Studio: data not saved** and everything reset
 | `Checkout.GiveItems` | on | Give customers the Tools they buy |
 | `Payouts.CashierCommissionPct` | 0 | Pays cashiers a share of each sale. This adds money to your game's economy |
 | `Inventory.LowStockAt` | 5 | Stock badges turn amber at this level |
+| `Orders.Enabled` | on | Order numbers, kitchen tickets and the order board |
+| `Orders.DiningOptions` | `"Eat in"`, `"Take away"` | Asked at the kiosk and on the till. `{}` to not ask |
+| `Orders.ReadyClearAfter` | 120 s | Ready orders leave the board after this if nobody marks them collected |
+| `Orders.LateAfter` | 120 s, 300 s | Kitchen tickets turn amber, then red |
+| `Kiosk.Enabled`, `Range`, `IdleTimeout` | on, 11 studs (about 3 m), 60 s | Self-order kiosks |
 | `Data.Scope` | `"v1"` | Change it (for example to `"v2"`) to start again with empty data |
-| `Demo.SpawnRegister`, `CreateItemTools` | on | Build the demo counter and placeholder Tools when none exist |
+| `Demo.SpawnRegister`, `CreateItemTools` | on | Build the demo restaurant and placeholder Tools when none exist |
+| `Tags` | see [Your own equipment](#your-own-equipment) | The tags RoPOS looks for |
 
 Other scripts in your game can check a player's role with `player:GetAttribute("POSRole")`. It returns `"Customer"`, `"Cashier"` or `"Manager"`, so staff doors and uniforms can follow the same rules.
 

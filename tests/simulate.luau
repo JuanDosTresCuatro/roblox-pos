@@ -12,9 +12,15 @@ local Loader = require("./sim/Loader")
 
 local ROOT = "."
 local V3 = Engine.datatypes.Vector3.new
-local AT_COUNTER = V3(-3, 3, -23.5) -- customer side of the demo counter
-local BEHIND = V3(-3, 3, -28.5) -- staff side
 local FAR = V3(0, 3, 80)
+-- Set from the demo counter's position once a server has built it.
+local AT_COUNTER, BEHIND
+
+-- A failure must never leave the run hanging (the servers' loops keep Lune alive).
+task.delay(110, function()
+	print("RoPOS simulation: timed out")
+	process.exit(2)
+end)
 
 local passed, failed = 0, 0
 local current = ""
@@ -85,14 +91,37 @@ local A = boot("Server A")
 local B = boot("Server B")
 check(A.api ~= nil and B.api ~= nil, "both servers created their remotes")
 
+local function demo(server)
+	return server.engine.workspace:FindFirstChild("RoPOS Demo")
+end
+
+local function counter(server)
+	return demo(server):FindFirstChild("RoPOS Counter")
+end
+
 local function display(server): string
-	local screen = server.engine.workspace:FindFirstChild("RoPOS Counter"):FindFirstChild("Screen")
-	return screen:FindFirstChild("Status", true).Text
+	return counter(server):FindFirstChild("Screen"):FindFirstChild("Status", true).Text
 end
 
 local function prompt(server)
-	return server.engine.workspace:FindFirstChild("RoPOS Counter"):FindFirstChild("Till"):FindFirstChild("RoPOSPrompt")
+	return counter(server):FindFirstChild("Till"):FindFirstChild("RoPOSPrompt")
 end
+
+-- Every piece of text drawn on a part, for checking boards.
+local function textOn(instance): string
+	local parts = {}
+	for _, descendant in instance:GetDescendants() do
+		if descendant.ClassName == "TextLabel" then
+			table.insert(parts, descendant.Text)
+		end
+	end
+	return table.concat(parts, " | ")
+end
+
+check(demo(A) ~= nil, "demo restaurant built")
+local till = counter(A):FindFirstChild("Till")
+AT_COUNTER = till.Position + V3(0, -1, 3.5)
+BEHIND = till.Position + V3(0, -1, -3.5)
 
 check(prompt(A) ~= nil, "demo counter built with a register prompt")
 check(display(A) == "Closed", "register screen says Closed", display(A))
@@ -182,6 +211,7 @@ check(
 )
 check(A.engine.lastPush(bob, "Receipt") ~= nil, "Bob gets the receipt")
 check(paid.receipt == "BM-000001", "response carries the receipt number")
+check(paid.orderNumber == 1, "counter sale gets order number 1", paid.orderNumber)
 check(A.module("Services.Catalogue").get("boombox").stock == 3, "Boombox stock 4 -> 3")
 check(display(A) == "Thank you!", "register screen says Thank you!", display(A))
 refused(
@@ -380,6 +410,92 @@ end
 local wins = (if results.A.ok then 1 else 0) + (if results.B.ok then 1 else 0)
 check(wins == 1, "exactly one refund succeeds", wins)
 check(cash(bob) == before + 24, "Bob is refunded £24 once", cash(bob) - before)
+
+step("Self-order kiosk")
+local kiosk = demo(A):FindFirstChild("Kiosk K1")
+check(kiosk ~= nil and kiosk:GetAttribute("KioskId") == "K1", "demo built kiosk K1")
+local kioskSpot = kiosk:FindFirstChild("Screen").Position + V3(0, -3.5, 3)
+refused(A.call(bob, "kiosk.start", "K1"), "Step closer", "too far away to use the kiosk")
+A.engine.moveTo(bob, kioskSpot)
+local started = ok(A.call(bob, "kiosk.start", "K1"), "Bob starts an order on the kiosk")
+check(started and #started.catalogue > 0, "kiosk gets the menu")
+check(kiosk:GetAttribute("Occupant") == bob.UserId, "kiosk shows it is in use by Bob")
+A.engine.moveTo(ann, kioskSpot)
+refused(A.call(ann, "kiosk.start", "K1"), "Someone else is using this kiosk", "one customer per kiosk")
+A.engine.moveTo(ann, BEHIND)
+local kioskCart = { { productId = "pizza", qty = 2 } }
+refused(
+	A.call(bob, "kiosk.checkout", "K1", kioskCart, nil, 8),
+	"Choose where you would like to eat",
+	"dining option required"
+)
+refused(
+	A.call(bob, "kiosk.checkout", "K1", kioskCart, "Take away", 5),
+	"Prices have changed",
+	"never charges a total the screen did not show"
+)
+local cashBefore = cash(bob)
+local kioskSale = ok(A.call(bob, "kiosk.checkout", "K1", kioskCart, "Take away", 8), "Bob pays £8 for 2 Pizza Slices")
+check(cash(bob) == cashBefore - 8, "Bob's Cash goes down by £8", cashBefore - cash(bob))
+check(kioskSale and kioskSale.source == "Kiosk" and kioskSale.dining == "Take away", "sale is marked Kiosk, Take away")
+check(
+	kioskSale and type(kioskSale.orderNumber) == "number",
+	"sale has an order number",
+	kioskSale and kioskSale.orderNumber
+)
+check(kiosk:GetAttribute("Occupant") == 0, "kiosk is free again after paying")
+check(count(bob.Backpack:GetChildren(), "Pizza Slice") == 2, "Bob receives 2 Pizza Slices")
+
+step("Kitchen display and order board")
+settle()
+local number = kioskSale.orderNumber
+local tickets = ok(A.call(bob, "orders.list"), "anyone can read the order list")
+local ticket
+for _, t in tickets or {} do
+	if t.number == number then
+		ticket = t
+	end
+end
+check(
+	ticket and ticket.status == "preparing" and ticket.lines[1].name == "Pizza Slice",
+	"ticket is on the kitchen display as preparing"
+)
+local board = demo(A):FindFirstChild("Order Board")
+check(string.find(textOn(board), tostring(number), 1, true) ~= nil, "order board shows the number", textOn(board))
+refused(A.call(bob, "orders.ready", number), "permission", "customers cannot mark orders ready")
+ok(A.call(cass, "orders.ready", number), "Cass marks it ready")
+settle()
+check(
+	A.engine.lastPush(bob, "OrderReady") and A.engine.lastPush(bob, "OrderReady").number == number,
+	"Bob is told his order is ready"
+)
+local readyNow = false
+for _, t in A.call(cass, "orders.list").data do
+	if t.number == number and t.status == "ready" then
+		readyNow = true
+	end
+end
+check(readyNow, "ticket moves to Ready")
+ok(A.call(cass, "orders.collect", number), "Cass marks it collected")
+settle()
+local stillThere = false
+for _, t in A.call(cass, "orders.list").data do
+	if t.number == number then
+		stillThere = true
+	end
+end
+check(not stillThere, "collected order leaves the board")
+check(
+	string.find(textOn(demo(A):FindFirstChild("Menu Snacks")), "£4", 1, true) ~= nil,
+	"menu board shows the new Bloxy Cola price"
+)
+
+step("Kiosk frees itself when the customer walks away")
+ok(A.call(bob, "kiosk.start", "K1"), "Bob starts another order")
+A.engine.moveTo(bob, FAR)
+settle(1.3)
+check(kiosk:GetAttribute("Occupant") == 0, "kiosk is free again")
+check(A.engine.lastPush(bob, "KioskClosed") ~= nil, "Bob's kiosk screen resets")
 
 step("No unexpected warnings")
 for _, server in { A, B } do

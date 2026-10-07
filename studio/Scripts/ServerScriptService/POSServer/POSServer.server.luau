@@ -13,6 +13,8 @@ local Sales = require(Services.Sales)
 local Demo = require(Services.Demo)
 local Registers = require(Services.Registers)
 local Checkout = require(Services.Checkout)
+local Kiosks = require(Services.Kiosks)
+local Boards = require(Services.Boards)
 
 Store.init()
 Staff.init()
@@ -24,6 +26,8 @@ Sales.init()
 Demo.setup()
 Registers.init()
 Checkout.init()
+Kiosks.init()
+Boards.init()
 require(script.Handlers)
 -- Remotes appear last, so a client never calls an action before its handler exists.
 Api.init(Staff.roleOf)
@@ -31,8 +35,9 @@ Store.start()
 
 print(
 	string.format(
-		"[RoPOS] Ready. %d register(s). Data %s.",
+		"[RoPOS] Ready. %d register(s), %d kiosk(s). Data %s.",
 		#Registers.all(),
+		#Kiosks.all(),
 		if Store.persistent then "saved to DataStores" else "in memory only"
 	)
 )

@@ -274,14 +274,41 @@ Config.Data = {
 	FlushInterval = 20, -- seconds between batched DataStore writes
 }
 
+Config.Orders = {
+	-- Every paid sale gets an order number and a ticket on the kitchen display.
+	Enabled = true,
+	-- Asked at the kiosk and on the till. Use {} to not ask.
+	DiningOptions = { "Eat in", "Take away" },
+	-- Seconds a ready order stays on the status board before it is cleared.
+	ReadyClearAfter = 120,
+	-- Ticket colours on the kitchen display: amber after this many seconds, red after the second.
+	LateAfter = { 120, 300 },
+}
+
+Config.Kiosk = {
+	Enabled = true,
+	-- The customer must stand within this distance to use a kiosk (about 3 m).
+	Range = 11,
+	-- A kiosk returns to its start screen after this many seconds without a tap.
+	IdleTimeout = 60,
+}
+
 Config.Demo = {
-	-- Build a shop counter if the place has no register tagged "POSRegister".
+	-- Build a demo restaurant (till, kiosks, kitchen display, boards) if the place has no register.
 	SpawnRegister = true,
 	-- Create simple item Tools for products that have no Tool in ServerStorage.POSItems.
 	CreateItemTools = true,
 }
 
-Config.RegisterTag = "POSRegister"
+-- CollectionService tags. Tag a Model or Part to turn it into that piece of equipment.
+Config.Tags = {
+	Register = "POSRegister", -- staff till with a customer "Your order" screen
+	Kiosk = "POSKiosk", -- self-order touchscreen
+	Kitchen = "POSKitchenDisplay", -- kitchen display: tickets with a Ready button for staff
+	OrderBoard = "POSOrderBoard", -- "Preparing" and "Ready" order numbers
+	MenuBoard = "POSMenuBoard", -- menu with live prices (attribute Category = one category)
+}
+Config.RegisterTag = Config.Tags.Register
 
 Config.Categories = { "Snacks", "Gear", "Tools", "Cosmetics" }
 
@@ -594,6 +621,54 @@ return Net
       </Item>
       <Item class="ModuleScript" referent="7">
         <Properties>
+          <string name="Name">Palette</string>
+          <string name="Source"><![CDATA[--!strict
+-- Colours shared by the POS window, the kiosks and every screen in the world.
+-- A clean white look with a warm yellow accent. Change these to rebrand everything at once.
+
+local rgb = Color3.fromRGB
+
+return {
+	Backdrop = rgb(10, 10, 14),
+	Bg = rgb(244, 244, 240),
+	Panel = rgb(255, 255, 255),
+	Raised = rgb(243, 243, 238),
+	RaisedHover = rgb(232, 232, 225),
+	Border = rgb(222, 222, 213),
+	Text = rgb(23, 23, 26),
+	Muted = rgb(102, 102, 110),
+	Faint = rgb(150, 150, 158),
+
+	Accent = rgb(255, 194, 14), -- brand yellow
+	AccentHover = rgb(255, 207, 64),
+	AccentSoft = rgb(255, 244, 205),
+	AccentText = rgb(140, 90, 0), -- yellow is unreadable as text on white; use this instead
+	OnAccent = rgb(23, 23, 26), -- text on a yellow fill
+
+	Success = rgb(22, 163, 74),
+	SuccessHover = rgb(30, 180, 86),
+	SuccessSoft = rgb(220, 247, 228),
+	OnSuccess = rgb(255, 255, 255),
+	Warning = rgb(217, 119, 6),
+	WarningSoft = rgb(254, 240, 199),
+	Danger = rgb(220, 38, 38),
+	DangerHover = rgb(235, 70, 70),
+	DangerSoft = rgb(253, 226, 226),
+	OnDanger = rgb(255, 255, 255),
+
+	Paper = rgb(255, 255, 251),
+	Ink = rgb(28, 28, 32),
+
+	-- Physical equipment in the demo world
+	Bezel = rgb(28, 30, 36),
+	Steel = rgb(70, 74, 84),
+	WhiteBody = rgb(236, 237, 240),
+}
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="8">
+        <Properties>
           <string name="Name">Pricing</string>
           <string name="Source"><![CDATA[--!strict
 -- Line pricing shared by the client (live cart preview) and the server (authoritative totals).
@@ -679,7 +754,7 @@ return Pricing
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="8">
+      <Item class="ModuleScript" referent="9">
         <Properties>
           <string name="Name">Roles</string>
           <string name="Source"><![CDATA[--!strict
@@ -712,7 +787,7 @@ return Roles
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="9">
+      <Item class="ModuleScript" referent="10">
         <Properties>
           <string name="Name">Signal</string>
           <string name="Source"><![CDATA[-- Minimal pure-Luau signal. Handlers run in their own thread so one error cannot break others.
@@ -752,7 +827,7 @@ return Signal
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="10">
+      <Item class="ModuleScript" referent="11">
         <Properties>
           <string name="Name">Validate</string>
           <string name="Source"><![CDATA[--!strict
@@ -836,11 +911,11 @@ return Validate
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="11">
+  <Item class="ServerScriptService" referent="12">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="12">
+    <Item class="Script" referent="13">
       <Properties>
         <string name="Name">POSServer</string>
         <token name="RunContext">0</token>
@@ -859,6 +934,8 @@ local Sales = require(Services.Sales)
 local Demo = require(Services.Demo)
 local Registers = require(Services.Registers)
 local Checkout = require(Services.Checkout)
+local Kiosks = require(Services.Kiosks)
+local Boards = require(Services.Boards)
 
 Store.init()
 Staff.init()
@@ -870,6 +947,8 @@ Sales.init()
 Demo.setup()
 Registers.init()
 Checkout.init()
+Kiosks.init()
+Boards.init()
 require(script.Handlers)
 -- Remotes appear last, so a client never calls an action before its handler exists.
 Api.init(Staff.roleOf)
@@ -877,14 +956,15 @@ Store.start()
 
 print(
 	string.format(
-		"[RoPOS] Ready. %d register(s). Data %s.",
+		"[RoPOS] Ready. %d register(s), %d kiosk(s). Data %s.",
 		#Registers.all(),
+		#Kiosks.all(),
 		if Store.persistent then "saved to DataStores" else "in memory only"
 	)
 )
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="13">
+      <Item class="ModuleScript" referent="14">
         <Properties>
           <string name="Name">Handlers</string>
           <string name="Source"><![CDATA[-- Every client action, in one place. Roles are checked by the router before a handler runs.
@@ -900,6 +980,8 @@ local Api = require(Services.Api)
 local Audit = require(Services.Audit)
 local Catalogue = require(Services.Catalogue)
 local Checkout = require(Services.Checkout)
+local Kiosks = require(Services.Kiosks)
+local Orders = require(Services.Orders)
 local Registers = require(Services.Registers)
 local Reports = require(Services.Reports)
 local Sales = require(Services.Sales)
@@ -940,7 +1022,8 @@ Api.handle("session.hello", Customer, function(player)
 		roleName = Roles.name(role),
 		maxDiscount = Staff.maxDiscount(player),
 		persistent = Store.persistent,
-		catalogue = if role >= Cashier then Catalogue.list() else nil,
+		catalogue = Catalogue.list(),
+		orders = Orders.list(),
 		register = if register then Registers.summary(register) else nil,
 	}
 end)
@@ -970,7 +1053,14 @@ Api.handle("register.preview", Cashier, function(player, rawCart, rawDiscount)
 			for _, line in cart do
 				items += line.qty
 			end
-			register.preview = { items = items, total = totals.total }
+			local lines = {}
+			for _, line in totals.lines do
+				table.insert(
+					lines,
+					{ name = line.name or line.productId, qty = line.qty, total = line.unitPrice * line.qty }
+				)
+			end
+			register.preview = { items = items, total = totals.total, discount = totals.discount, lines = lines }
 		end
 	end
 	Registers.updateDisplay(register)
@@ -1039,8 +1129,8 @@ end)
 
 -- Checkout -------------------------------------------------------------------------------
 
-Api.handle("checkout.start", Cashier, function(player, cart, discount, customerId)
-	return Checkout.start(player, myRegister(player), cart, discount, customerId)
+Api.handle("checkout.start", Cashier, function(player, cart, discount, customerId, dining)
+	return Checkout.start(player, myRegister(player), cart, discount, customerId, dining)
 end)
 
 Api.handle("checkout.cancel", Cashier, function(player, orderId)
@@ -1093,6 +1183,7 @@ Api.handle("sales.refund", Manager, function(player, receipt, restock)
 		end
 	end
 	Reports.recordRefund(sale, os.time())
+	Orders.cancelReceipt(sale.receipt)
 	local register = Registers.of(player)
 	if register and register.shift then
 		Shifts.recordRefund(register.shift, sale)
@@ -1163,21 +1254,67 @@ Api.handle("audit.recent", Manager, function(_player, limit)
 	return Audit.recent(Validate.int(limit, 1, 500) or 100)
 end)
 
--- Keep every staff screen in step with the catalogue.
+-- Kiosks (customers) ---------------------------------------------------------------------
+
+Api.handle("kiosk.start", Customer, function(player, id)
+	return Kiosks.start(player, id)
+end)
+
+Api.handle("kiosk.ping", Customer, function(player, id)
+	Kiosks.ping(player, id)
+end)
+
+Api.handle("kiosk.cancel", Customer, function(player, id)
+	Kiosks.cancel(player, id)
+end)
+
+Api.handle("kiosk.checkout", Customer, function(player, id, cart, dining, expectedTotal)
+	return Kiosks.checkout(player, id, cart, dining, expectedTotal)
+end)
+
+-- Orders (kitchen display and the Orders tab) --------------------------------------------
+
+local function orderNumber(raw: any): number
+	local number = Validate.int(raw, 1, 999)
+	if not number then
+		Api.fail("Invalid order number")
+	end
+	return number
+end
+
+local function orderAction(fn: (number, Player) -> (boolean, string?))
+	return function(player, raw)
+		local ok, problem = fn(orderNumber(raw), player)
+		if not ok then
+			Api.fail(problem or "That order is not on the board")
+		end
+	end
+end
+
+Api.handle("orders.list", Customer, function()
+	return Orders.list()
+end)
+Api.handle("orders.ready", Cashier, orderAction(Orders.markReady))
+Api.handle("orders.recall", Cashier, orderAction(Orders.recall))
+Api.handle("orders.collect", Cashier, orderAction(Orders.collect))
+
+-- Keep every screen in step with the catalogue. Menus, kiosks and tills all show it.
 Catalogue.changed:Connect(function()
 	local snapshot = Catalogue.list()
-	Api.pushWhere(Staff.isStaff, "Catalogue", snapshot)
+	Api.pushWhere(function()
+		return true
+	end, "Catalogue", snapshot)
 end)
 
 return {}
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="14">
+      <Item class="Folder" referent="15">
         <Properties>
           <string name="Name">Services</string>
         </Properties>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">Api</string>
             <string name="Source"><![CDATA[-- Request router for the single Api RemoteFunction.
@@ -1294,7 +1431,7 @@ return Api
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">Audit</string>
             <string name="Source"><![CDATA[-- Who did what and when. Entries are batched and merged into one rolling list shared by every
@@ -1382,7 +1519,242 @@ return Audit
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="17">
+        <Item class="ModuleScript" referent="18">
+          <Properties>
+            <string name="Name">Boards</string>
+            <string name="Source"><![CDATA[-- Screens everyone sees the same way, drawn by the server:
+--   POSOrderBoard  "Preparing" and "Ready" order numbers
+--   POSMenuBoard   menu with live prices and sold-out marks. Attribute Category = one category.
+-- Tag a Part (or a Model with a Part named "Screen"); the front face is drawn on.
+
+local CollectionService = game:GetService("CollectionService")
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Config = require(Shared.Config)
+local Format = require(Shared.Format)
+local Palette = require(Shared.Palette)
+local Catalogue = require(script.Parent.Catalogue)
+local Orders = require(script.Parent.Orders)
+local Surface = require(script.Parent.Surface)
+
+local Boards = {}
+
+local F = Surface.Fonts
+local GUI_NAME = "RoPOSBoard"
+
+local function screenOf(instance: Instance): BasePart?
+	local screen = instance:FindFirstChild("Screen", true)
+	if screen and screen:IsA("BasePart") then
+		return screen
+	end
+	return if instance:IsA("BasePart") then instance else nil
+end
+
+------------------------------------------------------------------------ order board
+
+local function drawOrderBoard(part: BasePart)
+	local _, root, size = Surface.create(part, GUI_NAME)
+	local unit = size.Y / 100 -- 1% of the board height
+	local header = 16 * unit
+
+	local preparing, ready = {}, {}
+	for _, ticket in Orders.list() do
+		table.insert(if ticket.status == "ready" then ready else preparing, ticket.number)
+	end
+
+	local function column(x: number, title: string, fill: Color3, ink: Color3, numbers: { number }, big: boolean)
+		local col = Surface.box(root, {
+			Position = UDim2.new(x, 2 * unit, 0, 2 * unit),
+			Size = UDim2.new(0.5, -3 * unit, 1, -4 * unit),
+			BackgroundColor3 = Palette.Raised,
+			Radius = math.floor(3 * unit),
+		})
+		local bar = Surface.box(
+			col,
+			{ Size = UDim2.new(1, 0, 0, header), BackgroundColor3 = fill, Radius = math.floor(3 * unit) }
+		)
+		Surface.text(bar, {
+			Text = title,
+			TextColor3 = ink,
+			FontFace = F.Heavy,
+			TextSize = 9 * unit,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Size = UDim2.fromScale(1, 1),
+		})
+		local grid = Surface.new("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(3 * unit, header + 3 * unit),
+			Size = UDim2.new(1, -6 * unit, 1, -(header + 6 * unit)),
+			Parent = col,
+		})
+		Surface.new("UIGridLayout", {
+			CellSize = UDim2.new(1 / 3, -2 * unit, 0, 16 * unit),
+			CellPadding = UDim2.fromOffset(2 * unit, 2 * unit),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Parent = grid,
+		})
+		for index, number in numbers do
+			if index > 12 then
+				break
+			end
+			Surface.text(grid, {
+				Text = tostring(number),
+				LayoutOrder = index,
+				FontFace = F.Heavy,
+				TextSize = (if big then 14 else 12) * unit,
+				TextColor3 = if big then Palette.Success else Palette.Text,
+				TextXAlignment = Enum.TextXAlignment.Center,
+			})
+		end
+	end
+
+	column(0, "Preparing", Palette.Accent, Palette.OnAccent, preparing, false)
+	column(0.5, "Ready", Palette.Success, Palette.OnSuccess, ready, true)
+end
+
+------------------------------------------------------------------------ menu board
+
+local function drawMenuBoard(part: BasePart, category: string?)
+	local _, root, size = Surface.create(part, GUI_NAME)
+	local unit = size.Y / 100
+
+	local products = {}
+	for _, product in Catalogue.list() do
+		if product.active and (not category or product.category == category) then
+			table.insert(products, product)
+		end
+	end
+
+	Surface.text(root, {
+		Text = category or Config.Store.Name,
+		FontFace = F.Heavy,
+		TextSize = 13 * unit,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Position = UDim2.fromOffset(0, 3 * unit),
+		Size = UDim2.new(1, 0, 0, 15 * unit),
+	})
+	Surface.box(root, {
+		BackgroundColor3 = Palette.Accent,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 19 * unit),
+		Size = UDim2.fromOffset(22 * unit, 1.4 * unit),
+		Radius = math.floor(unit),
+	})
+
+	local columns = if #products <= 4 then #products elseif #products <= 8 then 4 else 5
+	local rows = math.max(1, math.ceil(#products / math.max(columns, 1)))
+	local grid = Surface.new("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(4 * unit, 25 * unit),
+		Size = UDim2.new(1, -8 * unit, 1, -29 * unit),
+		Parent = root,
+	})
+	Surface.new("UIGridLayout", {
+		CellSize = UDim2.new(1 / math.max(columns, 1), -3 * unit, 1 / rows, -3 * unit),
+		CellPadding = UDim2.fromOffset(3 * unit, 3 * unit),
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = grid,
+	})
+	for index, product in products do
+		local soldOut = product.stock ~= nil and product.stock <= 0
+		local tile = Surface.new("Frame", { BackgroundTransparency = 1, LayoutOrder = index, Parent = grid })
+		local swatch = Surface.box(tile, {
+			BackgroundColor3 = product.colour,
+			BackgroundTransparency = if soldOut then 0.6 else 0,
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.fromScale(0.5, 0),
+			Size = UDim2.fromScale(0.42, 0.42),
+		})
+		Surface.new("UIAspectRatioConstraint", { AspectRatio = 1, Parent = swatch })
+		Surface.new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = swatch })
+		Surface.text(swatch, {
+			Text = string.upper(string.sub(product.name, 1, 1)),
+			FontFace = F.Heavy,
+			TextScaled = true,
+			TextColor3 = Color3.new(1, 1, 1),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Size = UDim2.fromScale(1, 1),
+		})
+		Surface.text(tile, {
+			Text = product.name,
+			FontFace = F.Bold,
+			TextSize = 5.2 * unit,
+			TextColor3 = if soldOut then Palette.Faint else Palette.Text,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Position = UDim2.fromScale(0, 0.47),
+			Size = UDim2.fromScale(1, 0.24),
+		})
+		Surface.text(tile, {
+			Text = if soldOut then "Sold out" else Format.money(product.price, Config.Currency.Symbol),
+			FontFace = F.Heavy,
+			TextSize = 6 * unit,
+			TextColor3 = if soldOut then Palette.Danger else Palette.AccentText,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Position = UDim2.fromScale(0, 0.72),
+			Size = UDim2.fromScale(1, 0.24),
+		})
+	end
+end
+
+------------------------------------------------------------------------ wiring
+
+local orderBoards: { BasePart } = {}
+local menuBoards: { { part: BasePart, category: string? } } = {}
+
+local function redrawOrders()
+	for _, part in orderBoards do
+		drawOrderBoard(part)
+	end
+end
+
+local function redrawMenus()
+	for _, board in menuBoards do
+		drawMenuBoard(board.part, board.category)
+	end
+end
+
+local function watch(tag: string, onAdd: (Instance, BasePart) -> ())
+	local function add(instance: Instance)
+		local part = screenOf(instance)
+		if part then
+			onAdd(instance, part)
+		else
+			warn("[RoPOS] " .. instance:GetFullName() .. " is tagged " .. tag .. " but has no Screen part")
+		end
+	end
+	for _, instance in CollectionService:GetTagged(tag) do
+		add(instance)
+	end
+	CollectionService:GetInstanceAddedSignal(tag):Connect(add)
+end
+
+function Boards.init()
+	watch(Config.Tags.OrderBoard, function(_, part)
+		table.insert(orderBoards, part)
+		drawOrderBoard(part)
+	end)
+	watch(Config.Tags.MenuBoard, function(instance, part)
+		local category = instance:GetAttribute("Category")
+		local board =
+			{ part = part, category = if typeof(category) == "string" and category ~= "" then category else nil }
+		table.insert(menuBoards, board)
+		drawMenuBoard(board.part, board.category)
+	end)
+	Orders.changed:Connect(redrawOrders)
+	Catalogue.changed:Connect(redrawMenus)
+end
+
+-- For tests: the numbers currently on an order board.
+function Boards.orderBoards(): { BasePart }
+	return orderBoards
+end
+
+return Boards
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="19">
           <Properties>
             <string name="Name">Catalogue</string>
             <string name="Source"><![CDATA[-- Products: fixed details come from Config.Products; price, active flag and stock are saved.
@@ -1589,7 +1961,7 @@ return Catalogue
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">Checkout</string>
             <string name="Source"><![CDATA[-- The payment handshake.
@@ -1618,6 +1990,7 @@ local Sales = require(script.Parent.Sales)
 local Shifts = require(script.Parent.Shifts)
 local Staff = require(script.Parent.Staff)
 local Wallet = require(script.Parent.Wallet)
+local Orders = require(script.Parent.Orders)
 
 local Checkout = {}
 
@@ -1629,6 +2002,7 @@ export type Order = {
 	cart: { Validate.CartLine },
 	discountPct: number,
 	totals: Pricing.Totals,
+	dining: string?,
 	status: "pending" | "paid" | "declined" | "expired" | "cancelled",
 	expiresAt: number,
 }
@@ -1711,7 +2085,22 @@ local function finish(order: Order, status, reason: string)
 	Registers.updateDisplay(order.register)
 end
 
-function Checkout.start(player: Player, register: Registers.Register, rawCart: any, rawDiscount: any, rawCustomer: any)
+-- Returns the dining option if it is one of Config.Orders.DiningOptions, or nil.
+function Checkout.dining(raw: any): string?
+	if typeof(raw) == "string" and table.find(Config.Orders.DiningOptions, raw) then
+		return raw
+	end
+	return nil
+end
+
+function Checkout.start(
+	player: Player,
+	register: Registers.Register,
+	rawCart: any,
+	rawDiscount: any,
+	rawCustomer: any,
+	rawDining: any
+)
 	if not register.shift then
 		Api.fail("Open a shift before taking payments")
 	end
@@ -1758,6 +2147,7 @@ function Checkout.start(player: Player, register: Registers.Register, rawCart: a
 		customer = customer,
 		cart = cart,
 		discountPct = discountPct,
+		dining = Checkout.dining(rawDining),
 		totals = totals,
 		status = "pending",
 		expiresAt = os.clock() + timeout,
@@ -1821,25 +2211,71 @@ function Checkout.respond(customer: Player, orderId: any, accept: any)
 		Api.fail("Prices or stock changed. The cashier needs to ring this up again.")
 	end
 
-	-- From here to the end of the stock loop nothing yields, so the debit and stock are atomic.
-	if not Wallet.tryDebit(customer, order.totals.total) then
-		Api.fail("You don't have enough " .. Config.Currency.StatName)
-	end
-	order.status = "paid"
-	detach(order)
-	for _, line in order.totals.lines do
-		Catalogue.adjustStock(line.productId, -line.qty)
-	end
-
 	local register = order.register
 	local operator = order.operator
-	local commission = math.floor(order.totals.total * Config.Payouts.CashierCommissionPct / 100)
+	local sale = Checkout.complete({
+		customer = customer,
+		totals = order.totals,
+		discountPct = order.discountPct,
+		registerId = register.id,
+		registerName = register.name,
+		shift = register.shift,
+		cashier = { userId = operator.UserId, name = operator.DisplayName },
+		actor = operator,
+		dining = order.dining,
+		source = "Counter",
+		onPaid = function()
+			order.status = "paid"
+			detach(order)
+			Registers.flashPaid(register)
+		end,
+	})
+	if not sale then
+		Api.fail("You don't have enough " .. Config.Currency.StatName)
+	end
+	Registers.flashPaid(register, sale.orderNumber)
+
+	local commission = math.floor(sale.total * Config.Payouts.CashierCommissionPct / 100)
 	if commission > 0 and operator ~= customer and operator.Parent then
 		Wallet.credit(operator, commission)
 	end
 
+	Api.push(operator, "OrderUpdate", { orderId = order.id, status = "paid", sale = sale })
+	Registers.refreshOperator(register)
+	return { status = "paid", receipt = sale.receipt, orderNumber = sale.orderNumber }
+end
+
+export type CompleteArgs = {
+	customer: Player,
+	totals: Pricing.Totals,
+	discountPct: number,
+	registerId: string,
+	registerName: string,
+	shift: Shifts.Shift?,
+	cashier: { userId: number, name: string },
+	actor: Player | string, -- who the audit log names
+	dining: string?,
+	source: string, -- "Counter" or "Kiosk"
+	onPaid: (() -> ())?, -- runs straight after the debit, before anything yields
+}
+
+-- Takes the money and the stock, then records the sale, gives the items and creates the order
+-- ticket. Nothing yields between the balance check and the stock change, so two payments can
+-- never spend the same money or the last item. Returns nil if the customer cannot pay.
+function Checkout.complete(args: CompleteArgs): Sales.Sale?
+	local customer, totals = args.customer, args.totals
+	if not Wallet.tryDebit(customer, totals.total) then
+		return nil
+	end
+	for _, line in totals.lines do
+		Catalogue.adjustStock(line.productId, -line.qty)
+	end
+	if args.onPaid then
+		args.onPaid()
+	end
+
 	local saleLines = {}
-	for _, line in order.totals.lines do
+	for _, line in totals.lines do
 		table.insert(saleLines, {
 			productId = line.productId,
 			name = line.name or line.productId,
@@ -1853,39 +2289,43 @@ function Checkout.respond(customer: Player, orderId: any, accept: any)
 	local sale: Sales.Sale = {
 		receipt = "",
 		t = os.time(),
-		registerId = register.id,
-		registerName = register.name,
-		shiftId = if register.shift then register.shift.id else nil,
-		cashier = { userId = operator.UserId, name = operator.DisplayName },
+		registerId = args.registerId,
+		registerName = args.registerName,
+		shiftId = if args.shift then args.shift.id else nil,
+		cashier = args.cashier,
 		customer = { userId = customer.UserId, name = customer.DisplayName },
 		lines = saleLines,
-		discountPct = order.discountPct,
-		subtotal = order.totals.subtotal,
-		discount = order.totals.discount,
-		tax = order.totals.tax,
-		total = order.totals.total,
+		discountPct = args.discountPct,
+		subtotal = totals.subtotal,
+		discount = totals.discount,
+		tax = totals.tax,
+		total = totals.total,
 		refunded = nil,
+		source = args.source,
+		dining = args.dining,
+		orderNumber = Orders.nextNumber(),
 	}
-	if register.shift then
-		Shifts.recordSale(register.shift, sale)
+	if args.shift then
+		Shifts.recordSale(args.shift, sale)
 	end
-	giveItems(customer, order.totals.lines)
-	Registers.flashPaid(register)
+	giveItems(customer, totals.lines)
 
 	Sales.record(sale) -- yields for the receipt number
-	if order.discountPct > 0 then
+	Orders.add(sale)
+	if args.discountPct > 0 then
 		Audit.log(
-			operator,
+			args.actor,
 			"discount",
-			string.format("%s: %d%% (%s off)", sale.receipt, order.discountPct, money(sale.discount))
+			string.format("%s: %d%% (%s off)", sale.receipt, args.discountPct, money(sale.discount))
 		)
 	end
-	Audit.log(operator, "sale", string.format("%s: %s to %s", sale.receipt, money(sale.total), customer.Name))
-
-	Api.push(operator, "OrderUpdate", { orderId = order.id, status = "paid", sale = sale })
+	Audit.log(
+		args.actor,
+		"sale",
+		string.format("%s: %s to %s (%s)", sale.receipt, money(sale.total), customer.Name, args.source)
+	)
 	Api.push(customer, "Receipt", sale)
-	Registers.refreshOperator(register)
-	return { status = "paid", receipt = sale.receipt }
+	return sale
 end
 
 function Checkout.init()
@@ -1906,25 +2346,38 @@ return Checkout
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">Demo</string>
-            <string name="Source"><![CDATA[-- Builds a shop counter with a register when the place has none, and simple item Tools for
+            <string name="Source"><![CDATA[-- Builds a demo restaurant when the place has no register: a wall of screens (order status
+-- board, kitchen display, a big "Your order" screen, menu boards), a counter with a POS
+-- terminal, and a black and a white self-order kiosk. Also creates simple item Tools for
 -- products that have no Tool in ServerStorage.POSItems. Turn both off in Config.Demo.
+--
+-- Layout, seen from the customers' side (+Z), all screens facing the customers:
+--
+--   [ Order board ][                ][            ][ Tools     ]
+--   [ Kitchen     ][   Your order   ][   Gear     ][ Cosmetics ]
+--   [ Snacks      ][                ][            ]
+--                     [ counter + till ]              (kiosk) (kiosk)
 
 local CollectionService = game:GetService("CollectionService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
 local Config = require(Shared.Config)
+local Palette = require(Shared.Palette)
 
 local Demo = {}
+
+local FRONT = Vector3.new(0, 0, 1) -- the direction the customers look from
 
 local function part(parent: Instance, props: { [string]: any }): Part
 	local p = Instance.new("Part")
 	p.Anchored = true
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Material = Enum.Material.SmoothPlastic
 	for key, value in props do
 		(p :: any)[key] = value
 	end
@@ -1932,126 +2385,258 @@ local function part(parent: Instance, props: { [string]: any }): Part
 	return p
 end
 
+-- A part whose front face looks along `facing`.
+local function facingCFrame(position: Vector3, facing: Vector3): CFrame
+	return CFrame.lookAt(position, position + facing)
+end
+
 local function groundY(x: number, z: number): number
 	local result = workspace:Raycast(Vector3.new(x, 500, z), Vector3.new(0, -1000, 0))
 	return if result then result.Position.Y else 0
 end
 
-local function sign(parent: Instance, text: string, cframe: CFrame)
-	local board = part(parent, {
-		Name = "Sign",
-		Size = Vector3.new(8, 1.6, 0.3),
-		CFrame = cframe,
-		Color = Color3.fromRGB(22, 25, 33),
-		Material = Enum.Material.SmoothPlastic,
-		CanCollide = false,
-	})
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 60
-	gui.LightInfluence = 0
-	gui.Brightness = 2
-	local textLabel = Instance.new("TextLabel")
-	textLabel.Size = UDim2.fromScale(1, 1)
-	textLabel.BackgroundTransparency = 1
-	textLabel.Text = text
-	textLabel.TextScaled = true
-	textLabel.TextColor3 = Color3.fromRGB(255, 214, 153)
-	textLabel.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold)
-	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0.18, 0)
-	padding.PaddingBottom = UDim.new(0.18, 0)
-	padding.Parent = textLabel
-	textLabel.Parent = gui
-	gui.Parent = board
+local function tag(instance: Instance, name: string, attributes: { [string]: any }?)
+	for key, value in (attributes or {}) :: { [string]: any } do
+		instance:SetAttribute(key, value)
+	end
+	CollectionService:AddTag(instance, name)
 end
 
-function Demo.buildCounter()
-	local origin = Vector3.new(0, 0, -26)
-	local y = groundY(origin.X, origin.Z)
-	-- Customers stand on the +Z side, staff behind the counter on the -Z side.
-	local base = CFrame.new(origin.X, y, origin.Z)
+-- A flat panel screen: a dark bezel with a "Screen" part on its front. Returns the model.
+local function wallScreen(parent: Instance, name: string, centre: Vector3, width: number, height: number): Model
+	local model = Instance.new("Model")
+	model.Name = name
+	local bezel = part(model, {
+		Name = "Bezel",
+		Size = Vector3.new(width, height, 0.4),
+		CFrame = facingCFrame(centre, FRONT),
+		Color = Palette.Bezel,
+	})
+	part(model, {
+		Name = "Screen",
+		Size = Vector3.new(width - 0.36, height - 0.36, 0.05),
+		CFrame = bezel.CFrame * CFrame.new(0, 0, -0.23),
+		Color = Palette.Panel,
+		CanCollide = false,
+	})
+	model.PrimaryPart = bezel
+	model.Parent = parent
+	return model
+end
 
+local function buildRoom(world: Instance, base: CFrame)
+	part(world, {
+		Name = "Floor",
+		Size = Vector3.new(70, 0.2, 44),
+		CFrame = base * CFrame.new(0, 0.1, 4),
+		Color = Color3.fromRGB(238, 238, 234),
+		Material = Enum.Material.Plastic,
+	})
+	part(world, {
+		Name = "BackWall",
+		Size = Vector3.new(70, 24, 1),
+		CFrame = base * CFrame.new(0, 12, -12.5),
+		Color = Color3.fromRGB(232, 233, 236),
+	})
+	part(world, {
+		Name = "Skirting",
+		Size = Vector3.new(70, 0.6, 0.2),
+		CFrame = base * CFrame.new(0, 0.5, -11.9),
+		Color = Palette.Steel,
+	})
+end
+
+local function buildScreens(world: Instance, base: CFrame, register: Model)
+	local z = -11.7
+	local board = wallScreen(world, "Order Board", (base * CFrame.new(-23, 18.6, z)).Position, 12, 6.4)
+	tag(board, Config.Tags.OrderBoard)
+
+	local kitchen = wallScreen(world, "Kitchen Display", (base * CFrame.new(-23, 11.6, z)).Position, 12, 6.4)
+	tag(kitchen, Config.Tags.Kitchen)
+
+	local snacks = wallScreen(world, "Menu Snacks", (base * CFrame.new(-23, 4.6, z)).Position, 12, 6.4)
+	tag(snacks, Config.Tags.MenuBoard, { Category = "Snacks" })
+
+	-- The till's customer screen is the big wall display, so it belongs to the register model.
+	local yourOrder = wallScreen(register, "Your Order", (base * CFrame.new(-6, 11.6, z)).Position, 15, 13.6)
+	yourOrder.Bezel.Name = "YourOrderBezel"
+	yourOrder.Screen.Parent = register
+
+	local gear = wallScreen(world, "Menu Gear", (base * CFrame.new(10.5, 11.6, z)).Position, 13, 13.6)
+	tag(gear, Config.Tags.MenuBoard, { Category = "Gear" })
+
+	local tools = wallScreen(world, "Menu Tools", (base * CFrame.new(25.5, 15.3, z)).Position, 11, 6.2)
+	tag(tools, Config.Tags.MenuBoard, { Category = "Tools" })
+	local cosmetics = wallScreen(world, "Menu Cosmetics", (base * CFrame.new(25.5, 8.4, z)).Position, 11, 6.2)
+	tag(cosmetics, Config.Tags.MenuBoard, { Category = "Cosmetics" })
+end
+
+-- The counter with a POS terminal facing the staff and a card reader facing the customer.
+local function buildCounter(base: CFrame): Model
 	local model = Instance.new("Model")
 	model.Name = "RoPOS Counter"
+	local at = base * CFrame.new(-6, 0, -1)
 
 	part(model, {
 		Name = "Counter",
 		Size = Vector3.new(16, 3.6, 3),
-		CFrame = base * CFrame.new(0, 1.8, 0),
-		Color = Color3.fromRGB(110, 76, 52),
-		Material = Enum.Material.WoodPlanks,
+		CFrame = at * CFrame.new(0, 1.8, 0),
+		Color = Palette.WhiteBody,
 	})
 	part(model, {
 		Name = "Top",
-		Size = Vector3.new(16.6, 0.3, 3.6),
-		CFrame = base * CFrame.new(0, 3.75, 0),
-		Color = Color3.fromRGB(235, 232, 226),
-		Material = Enum.Material.Marble,
+		Size = Vector3.new(16.4, 0.25, 3.4),
+		CFrame = at * CFrame.new(0, 3.72, 0),
+		Color = Palette.Steel,
 	})
+	part(model, {
+		Name = "Kick",
+		Size = Vector3.new(16, 0.5, 0.2),
+		CFrame = at * CFrame.new(0, 0.25, 1.55),
+		Color = Palette.Accent,
+		Material = Enum.Material.Neon,
+	})
+
 	local till = part(model, {
 		Name = "Till",
-		Size = Vector3.new(2.4, 0.7, 1.8),
-		CFrame = base * CFrame.new(-3, 4.25, -0.2),
-		Color = Color3.fromRGB(30, 34, 45),
-		Material = Enum.Material.SmoothPlastic,
+		Size = Vector3.new(1.8, 0.2, 1.4),
+		CFrame = at * CFrame.new(0, 3.95, -0.3),
+		Color = Palette.Bezel,
 	})
 	part(model, {
-		Name = "Stand",
-		Size = Vector3.new(0.3, 1.1, 0.3),
-		CFrame = base * CFrame.new(-3, 5.15, -0.3),
-		Color = Color3.fromRGB(45, 50, 64),
-		Material = Enum.Material.Metal,
+		Name = "Neck",
+		Size = Vector3.new(0.25, 1.1, 0.25),
+		CFrame = at * CFrame.new(0, 4.6, -0.3),
+		Color = Palette.Steel,
 	})
-	-- Tilted towards the customer. A part's front face points along its LookVector.
-	local screenPos = (base * CFrame.new(-3, 6.2, -0.15)).Position
+	-- Terminal screen, tilted back towards the staff.
+	local terminalPos = (at * CFrame.new(0, 5.6, -0.45)).Position
+	local terminal = part(model, {
+		Name = "Terminal",
+		Size = Vector3.new(2.6, 1.7, 0.18),
+		CFrame = CFrame.lookAt(terminalPos, terminalPos + Vector3.new(0, 0.35, -1)),
+		Color = Palette.Bezel,
+	})
 	part(model, {
-		Name = "Screen",
-		Size = Vector3.new(2.6, 1.6, 0.15),
-		CFrame = CFrame.lookAt(screenPos, screenPos + Vector3.new(0, 0.25, 1)),
-		Color = Color3.fromRGB(10, 10, 12),
-		Material = Enum.Material.Glass,
+		Name = "TerminalGlass",
+		Size = Vector3.new(2.4, 1.5, 0.02),
+		CFrame = terminal.CFrame * CFrame.new(0, 0, -0.1),
+		Color = Palette.Panel,
+		Material = Enum.Material.Neon,
+		Transparency = 0.15,
+		CanCollide = false,
 	})
 	part(model, {
 		Name = "CardReader",
-		Size = Vector3.new(0.6, 0.15, 0.9),
-		CFrame = base * CFrame.new(-1.2, 3.98, 0.9) * CFrame.Angles(math.rad(-15), 0, 0),
-		Color = Color3.fromRGB(45, 50, 64),
-		Material = Enum.Material.SmoothPlastic,
+		Size = Vector3.new(0.6, 0.14, 0.9),
+		CFrame = at * CFrame.new(1.6, 3.92, 1.05) * CFrame.Angles(math.rad(-15), 0, 0),
+		Color = Palette.Bezel,
 	})
 	part(model, {
-		Name = "TipJar",
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(1.1, 0.8, 0.8),
-		CFrame = base * CFrame.new(1.5, 4.45, 0.8) * CFrame.Angles(0, 0, math.rad(90)),
-		Color = Color3.fromRGB(200, 230, 255),
-		Material = Enum.Material.Glass,
-		Transparency = 0.4,
-	})
-
-	-- A menu board above the counter, readable from the customer side.
-	sign(model, "BLOX MART  🛒", base * CFrame.new(0, 9.5, 0) * CFrame.Angles(0, math.pi, 0))
-	part(model, {
-		Name = "SignPost",
-		Size = Vector3.new(0.3, 5.5, 0.3),
-		CFrame = base * CFrame.new(-7.5, 6.5, 0),
-		Color = Color3.fromRGB(45, 50, 64),
-		Material = Enum.Material.Metal,
-	})
-	part(model, {
-		Name = "SignPost",
-		Size = Vector3.new(0.3, 5.5, 0.3),
-		CFrame = base * CFrame.new(7.5, 6.5, 0),
-		Color = Color3.fromRGB(45, 50, 64),
-		Material = Enum.Material.Metal,
+		Name = "ReceiptPrinter",
+		Size = Vector3.new(0.9, 0.6, 0.9),
+		CFrame = at * CFrame.new(-1.7, 4.15, -0.4),
+		Color = Palette.WhiteBody,
 	})
 
 	model.PrimaryPart = till
 	model:SetAttribute("RegisterId", "R1")
 	model:SetAttribute("RegisterName", "Front Counter")
-	model.Parent = workspace
-	CollectionService:AddTag(model, Config.RegisterTag)
+	return model
+end
+
+-- A standing self-order kiosk with a portrait touchscreen, card reader and receipt slot.
+local function buildKiosk(world: Instance, base: CFrame, x: number, id: string, white: boolean)
+	local model = Instance.new("Model")
+	model.Name = "Kiosk " .. id
+	local at = base * CFrame.new(x, 0, 3)
+	local body = if white then Palette.WhiteBody else Palette.Bezel
+	local trim = if white then Palette.Steel else Color3.fromRGB(46, 48, 56)
+
+	part(model, {
+		Name = "Base",
+		Size = Vector3.new(3.4, 0.3, 2.6),
+		CFrame = at * CFrame.new(0, 0.15, 0),
+		Color = trim,
+	})
+	if white then
+		part(model, {
+			Name = "Pedestal",
+			Size = Vector3.new(2.6, 2.7, 0.9),
+			CFrame = at * CFrame.new(0, 1.65, -0.1),
+			Color = body,
+		})
+	else
+		part(model, {
+			Name = "Pole",
+			Size = Vector3.new(0.55, 2.7, 0.55),
+			CFrame = at * CFrame.new(0, 1.65, -0.1),
+			Color = trim,
+		})
+	end
+	local housing = part(model, {
+		Name = "Housing",
+		Size = Vector3.new(3.6, 6.2, 0.7),
+		CFrame = facingCFrame((at * CFrame.new(0, 6.1, -0.1)).Position, FRONT),
+		Color = body,
+	})
+	part(model, {
+		Name = "Bezel",
+		Size = Vector3.new(3.3, 4.7, 0.06),
+		CFrame = housing.CFrame * CFrame.new(0, 0.6, -0.37),
+		Color = Palette.Bezel,
+		CanCollide = false,
+	})
+	part(model, {
+		Name = "Screen",
+		Size = Vector3.new(3.1, 4.5, 0.04),
+		CFrame = housing.CFrame * CFrame.new(0, 0.6, -0.41),
+		Color = Palette.Panel,
+		CanCollide = false,
+	})
+	part(model, {
+		Name = "CardReader",
+		Size = Vector3.new(0.8, 1, 0.3),
+		CFrame = housing.CFrame * CFrame.new(0.9, -2.3, -0.45),
+		Color = trim,
+	})
+	part(model, {
+		Name = "CardLight",
+		Size = Vector3.new(0.5, 0.08, 0.05),
+		CFrame = housing.CFrame * CFrame.new(0.9, -1.95, -0.62),
+		Color = Palette.Success,
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+	})
+	part(model, {
+		Name = "ReceiptSlot",
+		Size = Vector3.new(1.2, 0.08, 0.05),
+		CFrame = housing.CFrame * CFrame.new(-0.7, -2.25, -0.37),
+		Color = Palette.Accent,
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+	})
+	model.PrimaryPart = housing
+	model.Parent = world
+	tag(model, Config.Tags.Kiosk, { KioskId = id, KioskName = "Kiosk " .. string.sub(id, 2) })
+end
+
+function Demo.buildRestaurant()
+	local origin = Vector3.new(0, 0, -30)
+	local base = CFrame.new(origin.X, groundY(origin.X, origin.Z), origin.Z)
+
+	local world = Instance.new("Folder")
+	world.Name = "RoPOS Demo"
+	world.Parent = workspace
+
+	buildRoom(world, base)
+	local register = buildCounter(base)
+	buildScreens(world, base, register)
+	register.Parent = world
+	tag(register, Config.Tags.Register)
+
+	buildKiosk(world, base, 19, "K1", false)
+	buildKiosk(world, base, 25, "K2", true)
 end
 
 local function buildTool(name: string, colour: Color3): Tool
@@ -2086,8 +2671,8 @@ function Demo.ensureItems()
 end
 
 function Demo.setup()
-	if Config.Demo.SpawnRegister and #CollectionService:GetTagged(Config.RegisterTag) == 0 then
-		Demo.buildCounter()
+	if Config.Demo.SpawnRegister and #CollectionService:GetTagged(Config.Tags.Register) == 0 then
+		Demo.buildRestaurant()
 	end
 	if Config.Demo.CreateItemTools then
 		Demo.ensureItems()
@@ -2098,7 +2683,432 @@ return Demo
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="22">
+          <Properties>
+            <string name="Name">Kiosks</string>
+            <string name="Source"><![CDATA[-- Self-order kiosks. Tag a Model or Part "POSKiosk"; a Part named "Screen" inside it becomes
+-- the touchscreen (the client draws it). One customer at a time: the server records who is
+-- using each kiosk in the "Occupant" attribute, so every client can show "In use".
+--
+-- Optional attributes on the tagged instance: KioskId (string), KioskName (string).
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Config = require(Shared.Config)
+local Validate = require(Shared.Validate)
+local Api = require(script.Parent.Api)
+local Catalogue = require(script.Parent.Catalogue)
+local Checkout = require(script.Parent.Checkout)
+local Wallet = require(script.Parent.Wallet)
+
+local Kiosks = {}
+
+export type Kiosk = {
+	id: string,
+	name: string,
+	instance: Instance,
+	screen: BasePart,
+	occupant: Player?,
+	lastActive: number,
+}
+
+local kiosks: { [string]: Kiosk } = {}
+local byInstance: { [Instance]: Kiosk } = {}
+local count = 0
+
+local function setOccupant(kiosk: Kiosk, player: Player?)
+	kiosk.occupant = player
+	kiosk.lastActive = os.clock()
+	kiosk.instance:SetAttribute("Occupant", if player then player.UserId else 0)
+end
+
+local function distance(kiosk: Kiosk, player: Player): number
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return math.huge
+	end
+	return (root.Position - kiosk.screen.Position).Magnitude
+end
+
+local function get(id: any): Kiosk
+	local kiosk = typeof(id) == "string" and kiosks[id]
+	if not kiosk then
+		Api.fail("Kiosk not found")
+	end
+	return kiosk
+end
+
+local function mine(player: Player, id: any): Kiosk
+	local kiosk = get(id)
+	if kiosk.occupant ~= player then
+		Api.fail("This kiosk has been reset. Tap the screen to start again.")
+	end
+	kiosk.lastActive = os.clock()
+	return kiosk
+end
+
+function Kiosks.release(kiosk: Kiosk, reason: string?)
+	local player = kiosk.occupant
+	if not player then
+		return
+	end
+	setOccupant(kiosk, nil)
+	if reason then
+		Api.push(player, "KioskClosed", { id = kiosk.id, reason = reason })
+	end
+end
+
+function Kiosks.start(player: Player, id: any)
+	if not Config.Kiosk.Enabled then
+		Api.fail("Kiosks are switched off")
+	end
+	local kiosk = get(id)
+	if distance(kiosk, player) > Config.Kiosk.Range then
+		Api.fail("Step closer to the kiosk")
+	end
+	if kiosk.occupant and kiosk.occupant ~= player and kiosk.occupant.Parent then
+		Api.fail("Someone else is using this kiosk")
+	end
+	for _, other in kiosks do
+		if other ~= kiosk and other.occupant == player then
+			Kiosks.release(other, nil)
+		end
+	end
+	setOccupant(kiosk, player)
+	return {
+		id = kiosk.id,
+		name = kiosk.name,
+		catalogue = Catalogue.list(),
+		balance = Wallet.balance(player),
+	}
+end
+
+function Kiosks.ping(player: Player, id: any)
+	mine(player, id)
+end
+
+function Kiosks.cancel(player: Player, id: any)
+	local kiosk = get(id)
+	if kiosk.occupant == player then
+		Kiosks.release(kiosk, nil)
+	end
+end
+
+function Kiosks.checkout(player: Player, id: any, rawCart: any, rawDining: any, rawExpected: any)
+	local kiosk = mine(player, id)
+	if distance(kiosk, player) > Config.Kiosk.Range + 4 then
+		Api.fail("Step closer to the kiosk")
+	end
+	local cart, problem = Validate.cart(rawCart, Config.Checkout.MaxLines, Config.Checkout.MaxQty)
+	if not cart then
+		Api.fail(problem or "Invalid order")
+	end
+	local dining = Checkout.dining(rawDining)
+	if #Config.Orders.DiningOptions > 0 and not dining then
+		Api.fail("Choose where you would like to eat")
+	end
+	local totals = Checkout.price(cart, 0)
+	-- The screen showed a total; never charge a different one.
+	if typeof(rawExpected) == "number" and rawExpected ~= totals.total then
+		Api.fail("Prices have changed. Check your order and try again.")
+	end
+	local sale = Checkout.complete({
+		customer = player,
+		totals = totals,
+		discountPct = 0,
+		registerId = kiosk.id,
+		registerName = kiosk.name,
+		shift = nil,
+		cashier = { userId = 0, name = kiosk.name },
+		actor = kiosk.name,
+		dining = dining,
+		source = "Kiosk",
+		onPaid = function()
+			setOccupant(kiosk, nil)
+		end,
+	})
+	if not sale then
+		Api.fail("You don't have enough " .. Config.Currency.StatName)
+	end
+	return sale
+end
+
+local function findScreen(instance: Instance): BasePart?
+	local screen = instance:FindFirstChild("Screen", true)
+	if screen and screen:IsA("BasePart") then
+		return screen
+	end
+	if instance:IsA("BasePart") then
+		return instance
+	end
+	return instance:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function add(instance: Instance)
+	if byInstance[instance] then
+		return
+	end
+	local screen = findScreen(instance)
+	if not screen then
+		warn("[RoPOS] " .. instance:GetFullName() .. " is tagged " .. Config.Tags.Kiosk .. " but has no parts")
+		return
+	end
+	count += 1
+	local id = instance:GetAttribute("KioskId")
+	if typeof(id) ~= "string" or id == "" or kiosks[id] then
+		id = "K" .. count
+		instance:SetAttribute("KioskId", id)
+	end
+	local name = instance:GetAttribute("KioskName")
+	if typeof(name) ~= "string" or name == "" then
+		name = "Kiosk " .. count
+		instance:SetAttribute("KioskName", name)
+	end
+	local kiosk: Kiosk = { id = id, name = name, instance = instance, screen = screen, occupant = nil, lastActive = 0 }
+	kiosks[id] = kiosk
+	byInstance[instance] = kiosk
+	setOccupant(kiosk, nil)
+end
+
+local function remove(instance: Instance)
+	local kiosk = byInstance[instance]
+	if kiosk then
+		Kiosks.release(kiosk, "The kiosk was removed")
+		kiosks[kiosk.id] = nil
+		byInstance[instance] = nil
+	end
+end
+
+function Kiosks.all(): { Kiosk }
+	local out = {}
+	for _, kiosk in kiosks do
+		table.insert(out, kiosk)
+	end
+	return out
+end
+
+function Kiosks.init()
+	for _, instance in CollectionService:GetTagged(Config.Tags.Kiosk) do
+		add(instance)
+	end
+	CollectionService:GetInstanceAddedSignal(Config.Tags.Kiosk):Connect(add)
+	CollectionService:GetInstanceRemovedSignal(Config.Tags.Kiosk):Connect(remove)
+
+	Players.PlayerRemoving:Connect(function(player)
+		for _, kiosk in kiosks do
+			if kiosk.occupant == player then
+				Kiosks.release(kiosk, nil)
+			end
+		end
+	end)
+
+	-- Free kiosks that were walked away from or left idle.
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			for _, kiosk in kiosks do
+				local player = kiosk.occupant
+				if player then
+					if not player.Parent then
+						Kiosks.release(kiosk, nil)
+					elseif distance(kiosk, player) > Config.Kiosk.Range + 6 then
+						Kiosks.release(kiosk, "You walked away from the kiosk")
+					elseif os.clock() - kiosk.lastActive > Config.Kiosk.IdleTimeout then
+						Kiosks.release(kiosk, "The kiosk timed out")
+					end
+				end
+			end
+		end
+	end)
+end
+
+return Kiosks
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="23">
+          <Properties>
+            <string name="Name">Orders</string>
+            <string name="Source"><![CDATA[-- Order tickets for the kitchen display and the order status board.
+--
+-- Every paid sale (till or kiosk) gets an order number and a ticket that moves
+-- preparing -> ready -> collected. Tickets live on this server only, because the kitchen,
+-- the board and the customer waiting for their food are all in this server.
+
+local Players = game:GetService("Players")
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Config = require(Shared.Config)
+local Signal = require(Shared.Signal)
+local Api = require(script.Parent.Api)
+local Audit = require(script.Parent.Audit)
+
+local Orders = {}
+Orders.changed = Signal.new()
+
+export type Ticket = {
+	number: number,
+	receipt: string,
+	source: string,
+	dining: string?,
+	customer: string,
+	customerId: number,
+	lines: { { name: string, qty: number } },
+	status: "preparing" | "ready" | "collected",
+	placedAt: number, -- os.time()
+	readyAt: number?,
+}
+
+local MAX_NUMBER = 999
+
+local tickets: { Ticket } = {} -- active (preparing or ready), oldest first
+local lastNumber = 0
+local queued = false
+
+local function find(number: number): (Ticket?, number?)
+	for index, ticket in tickets do
+		if ticket.number == number then
+			return ticket, index
+		end
+	end
+	return nil, nil
+end
+
+local function announce()
+	if queued then
+		return
+	end
+	queued = true
+	task.defer(function()
+		queued = false
+		Orders.changed:Fire()
+		Api.pushWhere(function()
+			return true
+		end, "Orders", Orders.list())
+	end)
+end
+
+-- The next order number, skipping any still on the board after the counter wraps.
+function Orders.nextNumber(): number
+	for _ = 1, MAX_NUMBER do
+		lastNumber = lastNumber % MAX_NUMBER + 1
+		if not find(lastNumber) then
+			return lastNumber
+		end
+	end
+	return lastNumber
+end
+
+function Orders.add(sale)
+	if not Config.Orders.Enabled or not sale.orderNumber then
+		return
+	end
+	local lines = {}
+	for _, line in sale.lines do
+		table.insert(lines, { name = line.name, qty = line.qty })
+	end
+	table.insert(tickets, {
+		number = sale.orderNumber,
+		receipt = sale.receipt,
+		source = sale.source or "Counter",
+		dining = sale.dining,
+		customer = sale.customer.name,
+		customerId = sale.customer.userId,
+		lines = lines,
+		status = "preparing",
+		placedAt = os.time(),
+		readyAt = nil,
+	})
+	announce()
+end
+
+function Orders.list(): { Ticket }
+	local out = {}
+	for _, ticket in tickets do
+		table.insert(out, table.clone(ticket))
+	end
+	return out
+end
+
+local function remove(ticket: Ticket)
+	local _, index = find(ticket.number)
+	if index then
+		table.remove(tickets, index)
+	end
+end
+
+function Orders.markReady(number: number, by: Player): (boolean, string?)
+	local ticket = find(number)
+	if not ticket then
+		return false, "Order " .. number .. " is not on the board"
+	end
+	if ticket.status == "ready" then
+		return true
+	end
+	ticket.status = "ready"
+	local readyAt = os.time()
+	ticket.readyAt = readyAt
+	Audit.log(by, "order.ready", string.format("Order %d (%s)", number, ticket.receipt))
+
+	local customer = Players:GetPlayerByUserId(ticket.customerId)
+	if customer then
+		Api.push(customer, "OrderReady", { number = number, dining = ticket.dining })
+	end
+
+	-- Clear it from the board if nobody marks it collected.
+	task.delay(Config.Orders.ReadyClearAfter, function()
+		if ticket.status == "ready" and ticket.readyAt == readyAt then
+			ticket.status = "collected"
+			remove(ticket)
+			announce()
+		end
+	end)
+	announce()
+	return true
+end
+
+function Orders.recall(number: number, by: Player): (boolean, string?)
+	local ticket = find(number)
+	if not ticket then
+		return false, "Order " .. number .. " is not on the board"
+	end
+	ticket.status = "preparing"
+	ticket.readyAt = nil
+	Audit.log(by, "order.recall", string.format("Order %d back to preparing", number))
+	announce()
+	return true
+end
+
+function Orders.collect(number: number, by: Player): (boolean, string?)
+	local ticket = find(number)
+	if not ticket then
+		return false, "Order " .. number .. " is not on the board"
+	end
+	ticket.status = "collected"
+	remove(ticket)
+	Audit.log(by, "order.collected", string.format("Order %d (%s)", number, ticket.receipt))
+	announce()
+	return true
+end
+
+-- When a sale is refunded, its ticket comes off the board.
+function Orders.cancelReceipt(receipt: string)
+	for _, ticket in table.clone(tickets) do
+		if ticket.receipt == receipt then
+			remove(ticket)
+			announce()
+		end
+	end
+end
+
+return Orders
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">Registers</string>
             <string name="Source"><![CDATA[-- Physical registers. Tag any Model or BasePart with "POSRegister" (CollectionService) and it
@@ -2107,29 +3117,25 @@ return Demo
 -- Optional attributes on the tagged instance:
 --   RegisterId   (string) stable id, generated if missing
 --   RegisterName (string) shown to staff and customers
--- Optional child: a BasePart named "Screen" for the customer display (front face).
+-- Optional child: a BasePart named "Screen" for the customer "Your order" display (front face).
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
 local Config = require(Shared.Config)
 local Format = require(Shared.Format)
+local Palette = require(Shared.Palette)
 local Signal = require(Shared.Signal)
 local Api = require(script.Parent.Api)
 local Staff = require(script.Parent.Staff)
 local Shifts = require(script.Parent.Shifts)
+local Surface = require(script.Parent.Surface)
 
 local Registers = {}
 Registers.released = Signal.new() -- (register, reason)
 
-export type Display = {
-	status: TextLabel,
-	detail: TextLabel,
-	total: TextLabel,
-	accent: Frame,
-}
+export type PreviewLine = { name: string, qty: number, total: number }
 
 export type Register = {
 	id: string,
@@ -2137,12 +3143,13 @@ export type Register = {
 	instance: Instance,
 	anchor: BasePart,
 	prompt: ProximityPrompt,
-	display: Display?,
+	screen: BasePart,
 	operator: Player?,
 	shift: Shifts.Shift?,
 	order: any?, -- the pending Checkout order, if any
-	preview: { items: number, total: number }?,
+	preview: { items: number, total: number, discount: number, lines: { PreviewLine } }?,
 	flashUntil: number,
+	flashNumber: number?,
 }
 
 local registers: { [string]: Register } = {}
@@ -2150,139 +3157,186 @@ local byInstance: { [Instance]: Register } = {}
 local byOperator: { [Player]: Register } = {}
 local count = 0
 
-local COLOURS = {
-	idle = Color3.fromRGB(88, 130, 255),
-	busy = Color3.fromRGB(242, 173, 61),
-	paid = Color3.fromRGB(46, 204, 113),
-	closed = Color3.fromRGB(110, 116, 135),
-}
+local F = Surface.Fonts
+local MAX_LINES = 5
 
 local function money(n: number): string
 	return Format.money(n, Config.Currency.Symbol)
 end
 
-local function label(parent: Instance, props: { [string]: any }): TextLabel
-	local text = Instance.new("TextLabel")
-	text.BackgroundTransparency = 1
-	text.TextColor3 = Color3.fromRGB(236, 239, 245)
-	text.TextScaled = true
-	text.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold)
-	for key, value in props do
-		(text :: any)[key] = value
-	end
-	text.Parent = parent
-	return text
-end
+-- The customer-facing "Your order" screen. Redrawn from scratch on every change.
+local function draw(register: Register, state)
+	local _, root, size = Surface.create(register.screen, "RoPOSDisplay")
+	local unit = size.Y / 100
 
-local function buildDisplay(register: Register): Display?
-	local screen = register.instance:FindFirstChild("Screen", true)
-	local part = if screen and screen:IsA("BasePart") then screen else nil
-	local gui: LayerCollector
-	if part then
-		local surface = Instance.new("SurfaceGui")
-		surface.Face = Enum.NormalId.Front
-		surface.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-		surface.PixelsPerStud = 120
-		surface.LightInfluence = 0
-		surface.Brightness = 1.6
-		surface.Adornee = part
-		gui = surface
-	else
-		local board = Instance.new("BillboardGui")
-		board.Size = UDim2.fromScale(5, 2.6)
-		board.StudsOffsetWorldSpace = Vector3.new(0, 3.5, 0)
-		board.MaxDistance = 60
-		board.Adornee = register.anchor
-		gui = board
-	end
-	gui.Name = "RoPOSDisplay"
-
-	local root = Instance.new("Frame")
-	root.Size = UDim2.fromScale(1, 1)
-	root.BackgroundColor3 = Color3.fromRGB(13, 15, 20)
-	root.Parent = gui
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0.06, 0)
-	corner.Parent = root
-
-	local accent = Instance.new("Frame")
-	accent.Size = UDim2.fromScale(1, 0.05)
-	accent.BorderSizePixel = 0
-	accent.BackgroundColor3 = COLOURS.closed
-	accent.Parent = root
-
-	label(root, {
-		Name = "Store",
-		Size = UDim2.fromScale(0.9, 0.13),
-		Position = UDim2.fromScale(0.05, 0.1),
-		Text = string.upper(Config.Store.Name),
-		TextColor3 = Color3.fromRGB(146, 153, 170),
-		TextXAlignment = Enum.TextXAlignment.Left,
+	-- Header: store name and a coloured strip that shows the state at a glance.
+	Surface.box(root, { Size = UDim2.new(1, 0, 0, 3 * unit), BackgroundColor3 = state.colour })
+	Surface.text(root, {
+		Text = Config.Store.Name,
+		FontFace = F.Heavy,
+		TextSize = 9 * unit,
+		Position = UDim2.fromOffset(6 * unit, 7 * unit),
+		Size = UDim2.new(0.6, 0, 0, 10 * unit),
 	})
-	local status = label(root, {
-		Name = "Status",
-		Size = UDim2.fromScale(0.9, 0.24),
-		Position = UDim2.fromScale(0.05, 0.27),
-		TextXAlignment = Enum.TextXAlignment.Left,
-	})
-	local detail = label(root, {
-		Name = "Detail",
-		Size = UDim2.fromScale(0.9, 0.13),
-		Position = UDim2.fromScale(0.05, 0.53),
-		TextColor3 = Color3.fromRGB(146, 153, 170),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Medium),
-	})
-	local total = label(root, {
-		Name = "Total",
-		Size = UDim2.fromScale(0.9, 0.24),
-		Position = UDim2.fromScale(0.05, 0.7),
+	Surface.text(root, {
+		Text = register.name,
+		FontFace = F.Medium,
+		TextSize = 7 * unit,
+		TextColor3 = Palette.Muted,
 		TextXAlignment = Enum.TextXAlignment.Right,
-		FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold),
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -6 * unit, 0, 8 * unit),
+		Size = UDim2.new(0.4, 0, 0, 9 * unit),
 	})
 
-	gui.Parent = part or register.anchor
-	return { status = status, detail = detail, total = total, accent = accent }
+	local status = Surface.text(root, {
+		Name = "Status",
+		Text = state.status,
+		FontFace = F.Heavy,
+		TextSize = (if state.lines then 11 else 19) * unit,
+		Position = UDim2.fromOffset(6 * unit, 22 * unit),
+		Size = UDim2.new(1, -12 * unit, 0, (if state.lines then 12 else 22) * unit),
+	})
+
+	if state.lines then
+		local list = Surface.new("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(6 * unit, 36 * unit),
+			Size = UDim2.new(1, -12 * unit, 0, 40 * unit),
+			Parent = root,
+		})
+		Surface.new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = list })
+		local shown = math.min(#state.lines, MAX_LINES)
+		for i = 1, shown do
+			local line = state.lines[i]
+			local text = if i == MAX_LINES and #state.lines > MAX_LINES
+				then string.format("+ %d more", #state.lines - MAX_LINES + 1)
+				else string.format("%d × %s", line.qty, line.name)
+			local row = Surface.new("Frame", {
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 0, 0, 8 * unit),
+				LayoutOrder = i,
+				Parent = list,
+			})
+			Surface.text(
+				row,
+				{ Text = text, FontFace = F.Medium, TextSize = 6.4 * unit, Size = UDim2.fromScale(0.75, 1) }
+			)
+			if not (i == MAX_LINES and #state.lines > MAX_LINES) then
+				Surface.text(row, {
+					Text = money(line.total),
+					FontFace = F.Mono,
+					TextSize = 6 * unit,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					Position = UDim2.fromScale(0.75, 0),
+					Size = UDim2.fromScale(0.25, 1),
+				})
+			end
+		end
+	else
+		Surface.text(root, {
+			Text = state.detail,
+			FontFace = F.Medium,
+			TextSize = 8 * unit,
+			TextColor3 = Palette.Muted,
+			Position = UDim2.fromOffset(6 * unit, 46 * unit),
+			Size = UDim2.new(1, -12 * unit, 0, 10 * unit),
+		})
+	end
+
+	-- Footer: the total on a yellow bar, or the order number after payment.
+	if state.total or state.number then
+		local bar = Surface.box(root, {
+			BackgroundColor3 = state.barColour or Palette.Accent,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.new(1, 0, 0, 20 * unit),
+		})
+		local ink = state.barInk or Palette.OnAccent
+		Surface.text(bar, {
+			Text = state.barLabel or "Total",
+			FontFace = F.Bold,
+			TextSize = 8 * unit,
+			TextColor3 = ink,
+			Position = UDim2.fromOffset(6 * unit, 0),
+			Size = UDim2.fromScale(0.6, 1),
+		})
+		Surface.text(bar, {
+			Text = if state.number then "Order " .. state.number else state.total,
+			FontFace = F.Heavy,
+			TextSize = 12 * unit,
+			TextColor3 = ink,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -6 * unit, 0, 0),
+			Size = UDim2.fromScale(0.5, 1),
+		})
+	end
+	return status
 end
 
 function Registers.updateDisplay(register: Register)
-	local display = register.display
 	local operator = register.operator
 	register.prompt.ObjectText = if operator then register.name .. " · " .. operator.DisplayName else register.name
-	if not display then
-		return
-	end
 
-	local status, detail, total, colour
+	local state
 	if os.clock() < register.flashUntil then
-		status, detail, total, colour = "Thank you!", "Payment approved", "✓", COLOURS.paid
+		state = {
+			status = "Thank you!",
+			detail = if register.flashNumber then "Watch the board for your number" else "Payment approved",
+			colour = Palette.Success,
+			number = register.flashNumber,
+			barColour = Palette.Success,
+			barInk = Palette.OnSuccess,
+			barLabel = "Your order number",
+		}
 	elseif register.order then
-		status = "Please approve"
-		detail = "Waiting for " .. register.order.customer.DisplayName
-		total, colour = money(register.order.totals.total), COLOURS.busy
+		local lines = {}
+		for _, line in register.order.totals.lines do
+			table.insert(
+				lines,
+				{ name = line.name or line.productId, qty = line.qty, total = line.unitPrice * line.qty }
+			)
+		end
+		state = {
+			status = "Please approve",
+			lines = lines,
+			colour = Palette.Warning,
+			total = money(register.order.totals.total),
+			barLabel = "Approve on your screen",
+		}
 	elseif operator and register.preview and register.preview.items > 0 then
-		status = string.format("%d item%s", register.preview.items, if register.preview.items == 1 then "" else "s")
-		detail = "Served by " .. operator.DisplayName
-		total, colour = money(register.preview.total), COLOURS.idle
+		state = {
+			status = "Your order",
+			lines = register.preview.lines,
+			colour = Palette.Accent,
+			total = money(register.preview.total),
+			barLabel = if register.preview.discount > 0
+				then "Total (" .. money(register.preview.discount) .. " off)"
+				else "Total",
+		}
 	elseif operator and register.shift then
-		status, detail, total, colour = "Welcome!", operator.DisplayName .. " can take your order", "", COLOURS.idle
+		state =
+			{ status = "Welcome!", detail = operator.DisplayName .. " can take your order", colour = Palette.Accent }
 	elseif register.shift then
-		status, detail, total, colour = "Back soon", "Waiting for a cashier", "", COLOURS.closed
+		state = { status = "Back soon", detail = "Waiting for a cashier", colour = Palette.Faint }
 	else
-		status, detail, total, colour = "Closed", register.name, "", COLOURS.closed
+		state = { status = "Closed", detail = register.name, colour = Palette.Faint }
 	end
-
-	display.status.Text = status
-	display.detail.Text = detail
-	display.total.Text = total
-	TweenService:Create(display.accent, TweenInfo.new(0.35), { BackgroundColor3 = colour }):Play()
+	draw(register, state)
 end
 
-function Registers.flashPaid(register: Register)
-	register.flashUntil = os.clock() + 4
+function Registers.flashPaid(register: Register, orderNumber: number?)
+	register.flashUntil = os.clock() + 5
+	register.flashNumber = orderNumber
 	register.preview = nil
 	Registers.updateDisplay(register)
-	task.delay(4.1, Registers.updateDisplay, register)
+	local flashedAt = register.flashUntil
+	task.delay(5.1, function()
+		if register.flashUntil == flashedAt then
+			Registers.updateDisplay(register)
+		end
+	end)
 end
 
 function Registers.summary(register: Register)
@@ -2358,6 +3412,23 @@ local function findAnchor(instance: Instance): BasePart?
 	return instance:FindFirstChildWhichIsA("BasePart", true)
 end
 
+-- The customer screen: a Part named "Screen", or a small one made above the till.
+local function findScreen(instance: Instance, anchor: BasePart): BasePart
+	local screen = instance:FindFirstChild("Screen", true)
+	if screen and screen:IsA("BasePart") then
+		return screen
+	end
+	local made = Instance.new("Part")
+	made.Name = "Screen"
+	made.Anchored = true
+	made.CanCollide = false
+	made.Size = Vector3.new(3.2, 2, 0.1)
+	made.Color = Palette.Bezel
+	made.CFrame = anchor.CFrame * CFrame.new(0, anchor.Size.Y / 2 + 1.6, 0)
+	made.Parent = instance
+	return made
+end
+
 local function add(instance: Instance)
 	if byInstance[instance] then
 		return
@@ -2394,14 +3465,14 @@ local function add(instance: Instance)
 		instance = instance,
 		anchor = anchor,
 		prompt = prompt,
-		display = nil,
+		screen = findScreen(instance, anchor),
 		operator = nil,
 		shift = nil,
 		order = nil,
 		preview = nil,
 		flashUntil = 0,
+		flashNumber = nil,
 	}
-	register.display = buildDisplay(register)
 	registers[id] = register
 	byInstance[instance] = register
 
@@ -2462,7 +3533,7 @@ return Registers
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">Reports</string>
             <string name="Source"><![CDATA[-- Daily totals (UTC days) shared across servers. Each server keeps a delta per day and merges
@@ -2577,7 +3648,7 @@ return Reports
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">Sales</string>
             <string name="Source"><![CDATA[-- Receipts. Each sale is its own DataStore key ("s/BM-000042"); a rolling list of the latest
@@ -2616,6 +3687,9 @@ export type Sale = {
 	tax: number,
 	total: number,
 	refunded: { t: number, by: string, restocked: boolean }?,
+	source: string?, -- "Counter" or "Kiosk"
+	dining: string?, -- "Eat in", "Take away" or nil
+	orderNumber: number?,
 }
 
 export type Summary = {
@@ -2809,7 +3883,7 @@ return Sales
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">Shifts</string>
             <string name="Source"><![CDATA[-- Register shifts: open, take sales, X report at any time, Z report on close.
@@ -2895,7 +3969,7 @@ return Shifts
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">Staff</string>
             <string name="Source"><![CDATA[--!nolint DeprecatedApi
@@ -2985,7 +4059,7 @@ return Staff
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">Store</string>
             <string name="Source"><![CDATA[-- DataStore access with retries, a serialised flush loop, and an in-memory fallback for
@@ -3140,7 +4214,103 @@ return Store
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="30">
+          <Properties>
+            <string name="Name">Surface</string>
+            <string name="Source"><![CDATA[-- Helpers for drawing on the front face of a part (registers' customer screens, boards).
+-- Canvases are a fixed size in pixels worked out from the part, so layouts are predictable.
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Palette = require(Shared.Palette)
+
+local Surface = {}
+
+local FAMILY = "rbxasset://fonts/families/BuilderSans.json"
+Surface.Fonts = {
+	Medium = Font.new(FAMILY, Enum.FontWeight.Medium),
+	Bold = Font.new(FAMILY, Enum.FontWeight.Bold),
+	Heavy = Font.new(FAMILY, Enum.FontWeight.ExtraBold),
+	Mono = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold),
+}
+
+local PIXELS_PER_STUD = 100
+
+-- Creates a SurfaceGui on the part's front face. Returns the gui, its root frame and its size.
+function Surface.create(part: BasePart, name: string): (SurfaceGui, Frame, Vector2)
+	local existing = part:FindFirstChild(name)
+	if existing then
+		existing:Destroy()
+	end
+	local canvas = Vector2.new(part.Size.X, part.Size.Y) * PIXELS_PER_STUD
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = name
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+	gui.CanvasSize = canvas
+	gui.LightInfluence = 0
+	gui.Brightness = 1.4
+	gui.MaxDistance = 120
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Adornee = part
+
+	local root = Instance.new("Frame")
+	root.Name = "Root"
+	root.Size = UDim2.fromScale(1, 1)
+	root.BorderSizePixel = 0
+	root.BackgroundColor3 = Palette.Panel
+	root.Parent = gui
+	gui.Parent = part
+	return gui, root, canvas
+end
+
+function Surface.new(className: string, props: { [string]: any }): any
+	local instance = Instance.new(className)
+	local parent
+	for key, value in props do
+		if key == "Parent" then
+			parent = value
+		else
+			(instance :: any)[key] = value
+		end
+	end
+	instance.Parent = parent
+	return instance
+end
+
+function Surface.text(parent: Instance, props: { [string]: any }): TextLabel
+	local defaults = {
+		BackgroundTransparency = 1,
+		TextColor3 = Palette.Text,
+		FontFace = Surface.Fonts.Bold,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = parent,
+	}
+	for key, value in props do
+		defaults[key] = value
+	end
+	return Surface.new("TextLabel", defaults)
+end
+
+function Surface.box(parent: Instance, props: { [string]: any }): Frame
+	local defaults = { BorderSizePixel = 0, BackgroundColor3 = Palette.Raised, Parent = parent }
+	local radius = props.Radius
+	props.Radius = nil
+	for key, value in props do
+		defaults[key] = value
+	end
+	local frame = Surface.new("Frame", defaults)
+	if radius then
+		Surface.new("UICorner", { CornerRadius = UDim.new(0, radius), Parent = frame })
+	end
+	return frame
+end
+
+return Surface
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="31">
           <Properties>
             <string name="Name">Wallet</string>
             <string name="Source"><![CDATA[-- The customer's money.
@@ -3353,7 +4523,7 @@ return Wallet
         </Item>
       </Item>
     </Item>
-    <Item class="Script" referent="27">
+    <Item class="Script" referent="32">
       <Properties>
         <string name="Name">POSTests</string>
         <token name="RunContext">0</token>
@@ -3379,7 +4549,7 @@ if not kit.report() then
 end
 ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="28">
+      <Item class="ModuleScript" referent="33">
         <Properties>
           <string name="Name">Specs</string>
           <string name="Source"><![CDATA[-- Specs for the pure shared modules. `M` holds the modules so this file works with both
@@ -3544,7 +4714,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="29">
+      <Item class="ModuleScript" referent="34">
         <Properties>
           <string name="Name">TestKit</string>
           <string name="Source"><![CDATA[-- Tiny test harness that runs both in the Luau CLI and inside Roblox Studio.
@@ -3641,28 +4811,28 @@ return TestKit
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="30">
+      <Item class="Folder" referent="35">
         <Properties>
           <string name="Name">sim</string>
         </Properties>
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="31">
+  <Item class="SoundService" referent="36">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="32">
+  <Item class="StarterPlayer" referent="37">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="33">
+    <Item class="StarterPlayerScripts" referent="38">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="34">
+      <Item class="LocalScript" referent="39">
         <Properties>
           <string name="Name">POSClient</string>
           <string name="Source"><![CDATA[-- RoPOS client bootstrap.
@@ -3677,6 +4847,8 @@ local Api = require(script.Api)
 local App = require(script.App)
 local PaymentPrompt = require(script.PaymentPrompt)
 local State = require(script.State)
+local Kiosk = require(script.World.Kiosk)
+local Kitchen = require(script.World.Kitchen)
 local Toasts = require(script.UI.Toasts)
 
 local hello
@@ -3699,9 +4871,12 @@ State.maxDiscount = hello.maxDiscount
 State.persistent = hello.persistent
 State.set("catalogue", hello.catalogue or {})
 State.register = hello.register
+State.orders = hello.orders or {}
 
 App.mount()
 PaymentPrompt.mount(App.overlay() :: any)
+Kiosk.mount()
+Kitchen.mount()
 
 Api.on("OpenRegister", function(summary)
 	State.set("register", summary)
@@ -3722,6 +4897,14 @@ end)
 
 Api.on("Catalogue", function(list)
 	State.set("catalogue", list)
+end)
+
+Api.on("Orders", function(list)
+	State.set("orders", list)
+end)
+
+Api.on("OrderReady", function(payload)
+	Toasts.show(string.format("Order %d is ready to collect!", payload.number), "success")
 end)
 
 Api.on("Toast", function(toast)
@@ -3753,7 +4936,7 @@ if hello.register then
 end
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">Api</string>
             <string name="Source"><![CDATA[-- Client side of the Api router: Api.call returns (ok, dataOrError), Api.on listens to pushes.
@@ -3800,7 +4983,7 @@ return Api
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="41">
           <Properties>
             <string name="Name">App</string>
             <string name="Source"><![CDATA[-- The staff window: header, tabs and screens. Opens when a cashier uses a register.
@@ -3829,6 +5012,7 @@ type Screen = { frame: GuiObject, show: (() -> ())? }
 
 local TABS = {
 	{ id = "sell", label = "Sell", icon = "🛒", role = Roles.Cashier, module = "Sell" },
+	{ id = "orders", label = "Orders", icon = "🔔", role = Roles.Cashier, module = "Orders" },
 	{ id = "sales", label = "Sales", icon = "🧾", role = Roles.Cashier, module = "Sales" },
 	{ id = "shift", label = "Shift", icon = "⏱", role = Roles.Cashier, module = "Shift" },
 	{ id = "products", label = "Products", icon = "📦", role = Roles.Manager, module = "Products" },
@@ -4013,14 +5197,14 @@ local function header(): Frame
 				Text = string.sub(Config.Store.Name, 1, 1),
 				FontFace = F.Heavy,
 				TextSize = 22,
-				TextColor3 = Color3.new(1, 1, 1),
+				TextColor3 = C.OnAccent,
 				BackgroundColor3 = C.Accent,
 				Size = UDim2.fromOffset(42, 42),
 				Position = UDim2.fromOffset(0, 3),
 				Children = {
 					UI.corner(Theme.Radius.Medium),
 					UI.new("UIGradient", {
-						Color = ColorSequence.new(C.AccentHover, Color3.fromRGB(150, 92, 255)),
+						Color = ColorSequence.new(C.AccentHover, C.Accent),
 						Rotation = 45,
 					}),
 				},
@@ -4151,7 +5335,7 @@ return App
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="42">
           <Properties>
             <string name="Name">PaymentPrompt</string>
             <string name="Source"><![CDATA[-- The customer's side of checkout: an itemised bill with a countdown, Pay and Decline.
@@ -4417,7 +5601,7 @@ return PaymentPrompt
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="43">
           <Properties>
             <string name="Name">Receipt</string>
             <string name="Source"><![CDATA[-- Paper-style receipts and shift reports, with the manager refund flow.
@@ -4507,11 +5691,17 @@ function Receipt.saleLines(sale): { Line }
 		{ text = sale.registerName, align = "center" },
 		rule(),
 		row("Receipt", sale.receipt),
-		row("Date", Format.dateTime(sale.t)),
-		row("Cashier", sale.cashier.name),
-		row("Customer", sale.customer.name),
-		rule(),
 	}
+	if sale.orderNumber then
+		table.insert(lines, { text = Format.row("ORDER", "#" .. sale.orderNumber, WIDTH), bold = true })
+	end
+	if sale.dining then
+		table.insert(lines, row("Dining", sale.dining))
+	end
+	table.insert(lines, row("Date", Format.dateTime(sale.t)))
+	table.insert(lines, row(if sale.source == "Kiosk" then "Kiosk" else "Cashier", sale.cashier.name))
+	table.insert(lines, row("Customer", sale.customer.name))
+	table.insert(lines, rule())
 	for _, line in sale.lines do
 		table.insert(lines, row(string.format("%d x %s", line.qty, line.name), money(line.unitPrice * line.qty)))
 	end
@@ -4670,11 +5860,11 @@ return Receipt
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="39">
+        <Item class="Folder" referent="44">
           <Properties>
             <string name="Name">Screens</string>
           </Properties>
-          <Item class="ModuleScript" referent="40">
+          <Item class="ModuleScript" referent="45">
             <Properties>
               <string name="Name">Audit</string>
               <string name="Source"><![CDATA[-- Audit log (managers): sign-offs on sales, discounts, refunds, price, stock and shift changes.
@@ -4775,7 +5965,173 @@ return Audit
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="41">
+          <Item class="ModuleScript" referent="46">
+            <Properties>
+              <string name="Name">Orders</string>
+              <string name="Source"><![CDATA[-- Orders: the same tickets as the kitchen display, for staff at the till or on a phone.
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Config = require(Shared.Config)
+
+local Client = script.Parent.Parent
+local Api = require(Client.Api)
+local State = require(Client.State)
+local UI = require(Client.UI.UI)
+local Theme = require(Client.UI.Theme)
+local Toasts = require(Client.UI.Toasts)
+
+local C, F = Theme.Colors, Theme.Fonts
+
+local Orders = {}
+
+local function act(action: string, number: number)
+	local ok, err = Api.call(action, number)
+	if not ok then
+		Toasts.show(err, "error")
+	end
+end
+
+function Orders.new(_ctx)
+	local self = {}
+	local frame = UI.new("Frame", { Name = "Orders", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1) })
+	self.frame = frame
+
+	UI.text({ Text = "Orders", TextSize = 24, FontFace = F.Heavy, Size = UDim2.new(0.5, 0, 0, 30), Parent = frame })
+	UI.text({
+		Text = "Mark orders ready when they are made, and collected when the customer has them.",
+		TextSize = 14,
+		TextColor3 = C.Muted,
+		Position = UDim2.fromOffset(0, 30),
+		Size = UDim2.new(1, 0, 0, 18),
+		Parent = frame,
+	})
+	local list = UI.scroll({
+		Position = UDim2.fromOffset(0, 62),
+		Size = UDim2.new(1, 0, 1, -62),
+		Parent = frame,
+		Children = { UI.list(8) },
+	})
+
+	local function render()
+		UI.clear(list)
+		if #State.orders == 0 then
+			UI.text({ Text = "No orders waiting", TextColor3 = C.Faint, Parent = list })
+		end
+		for i, ticket in State.orders do
+			local isReady = ticket.status == "ready"
+			local items = {}
+			for _, line in ticket.lines do
+				table.insert(items, line.qty .. " × " .. line.name)
+			end
+			local minutes = math.max(0, os.time() - ticket.placedAt) // 60
+			local row = UI.card({
+				Size = UDim2.new(1, -8, 0, 64),
+				LayoutOrder = i,
+				Parent = list,
+				Children = {
+					UI.text({
+						Text = "#" .. ticket.number,
+						FontFace = F.Heavy,
+						TextSize = 26,
+						TextColor3 = if isReady then C.Success else C.Text,
+						Position = UDim2.fromOffset(16, 0),
+						Size = UDim2.new(0, 80, 1, 0),
+					}),
+					UI.text({
+						Text = table.concat(items, ", "),
+						FontFace = F.Bold,
+						TextSize = 15,
+						Position = UDim2.fromOffset(100, 12),
+						Size = UDim2.new(1, -380, 0, 20),
+					}),
+					UI.text({
+						Text = string.format(
+							"%s · %s%s · %d min",
+							ticket.customer,
+							ticket.source,
+							if ticket.dining then " · " .. ticket.dining else "",
+							minutes
+						),
+						TextSize = 13,
+						TextColor3 = C.Muted,
+						Position = UDim2.fromOffset(100, 34),
+						Size = UDim2.new(1, -380, 0, 18),
+					}),
+					if isReady
+						then UI.pill("Ready", C.Success, C.SuccessSoft, {
+							AnchorPoint = Vector2.new(1, 0.5),
+							Position = UDim2.new(1, -264, 0.5, 0),
+						})
+						else UI.pill("Preparing", C.AccentText, C.AccentSoft, {
+							AnchorPoint = Vector2.new(1, 0.5),
+							Position = UDim2.new(1, -264, 0.5, 0),
+						}),
+				},
+			})
+			local actions = UI.new("Frame", {
+				BackgroundTransparency = 1,
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -12, 0.5, 0),
+				Size = UDim2.fromOffset(240, 40),
+				Parent = row,
+				Children = {
+					UI.list(8, Enum.FillDirection.Horizontal, { HorizontalAlignment = Enum.HorizontalAlignment.Right }),
+				},
+			})
+			if isReady then
+				UI.button({
+					Text = "Recall",
+					Style = "ghost",
+					Size = UDim2.fromOffset(90, 40),
+					LayoutOrder = 1,
+					Parent = actions,
+					OnClick = function()
+						act("orders.recall", ticket.number)
+					end,
+				})
+				UI.button({
+					Text = "Collected",
+					Style = "primary",
+					Size = UDim2.fromOffset(120, 40),
+					LayoutOrder = 2,
+					Parent = actions,
+					OnClick = function()
+						act("orders.collect", ticket.number)
+					end,
+				})
+			else
+				UI.button({
+					Text = "Ready",
+					Style = "success",
+					Size = UDim2.fromOffset(120, 40),
+					LayoutOrder = 2,
+					Parent = actions,
+					OnClick = function()
+						act("orders.ready", ticket.number)
+					end,
+				})
+			end
+		end
+	end
+
+	State.changed:Connect(function(key)
+		if key == "orders" and frame.Visible then
+			render()
+		end
+	end)
+
+	self.show = render
+	if not Config.Orders.Enabled then
+		self.hidden = true
+	end
+	return self
+end
+
+return Orders
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="47">
             <Properties>
               <string name="Name">Products</string>
               <string name="Source"><![CDATA[-- Products (managers): prices, stock adjustments and on/off sale. Changes reach every server.
@@ -4980,7 +6336,7 @@ return Products
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="42">
+          <Item class="ModuleScript" referent="48">
             <Properties>
               <string name="Name">Reports</string>
               <string name="Source"><![CDATA[-- Reports (managers): 7-day takings chart, totals, best sellers and cashier leaderboard.
@@ -5250,7 +6606,7 @@ return Reports
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="43">
+          <Item class="ModuleScript" referent="49">
             <Properties>
               <string name="Name">Sales</string>
               <string name="Source"><![CDATA[-- Sales history: the latest receipts across every server, lookup by receipt number, refunds.
@@ -5425,7 +6781,7 @@ return Sales
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="44">
+          <Item class="ModuleScript" referent="50">
             <Properties>
               <string name="Name">Sell</string>
               <string name="Source"><![CDATA[-- Sell: product grid on the left, order on the right. Totals are computed with the same
@@ -5450,6 +6806,8 @@ local Sell = {}
 
 local CART_WIDTH = 368
 local BOTTOM_HEIGHT = 244
+local DINING = Config.Orders.DiningOptions
+local LINES_TOP = if #DINING > 0 then 134 else 94
 
 local current -- the live screen instance; push listeners forward to it
 
@@ -5473,6 +6831,7 @@ function Sell.new(ctx)
 
 	local cart: { { productId: string, qty: number } } = {}
 	local discount = 0
+	local dining: string? = DINING[1]
 	local customer: { userId: number, name: string }? = nil
 	local pending: { orderId: string, customer: string, total: number }? = nil
 	local category = "All"
@@ -5556,10 +6915,40 @@ function Sell.new(ctx)
 	UI.padding(0, 14).Parent = customerButton
 	customerButton.Parent = panel
 
+	-- Eat in / Take away
+	local diningRow = UI.new("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(0, 92),
+		Size = UDim2.new(1, 0, 0, 34),
+		Visible = #DINING > 0,
+		Parent = panel,
+		Children = { UI.list(6, Enum.FillDirection.Horizontal) },
+	})
+	local renderDining -- forward
+	function renderDining()
+		UI.clear(diningRow)
+		for i, option in DINING do
+			UI.button({
+				Text = option,
+				Style = if option == dining then "primary" else "secondary",
+				TextSize = 14,
+				Size = UDim2.new(1 / #DINING, -6, 1, 0),
+				LayoutOrder = i,
+				Radius = Theme.Radius.Pill,
+				Parent = diningRow,
+				OnClick = function()
+					dining = option
+					renderDining()
+				end,
+			})
+		end
+	end
+	renderDining()
+
 	local lines = UI.scroll({
 		Name = "Lines",
-		Position = UDim2.fromOffset(0, 94),
-		Size = UDim2.new(1, 0, 1, -(94 + BOTTOM_HEIGHT)),
+		Position = UDim2.fromOffset(0, LINES_TOP),
+		Size = UDim2.new(1, 0, 1, -(LINES_TOP + BOTTOM_HEIGHT)),
 		Parent = panel,
 		Children = { UI.list(6) },
 	})
@@ -5568,8 +6957,8 @@ function Sell.new(ctx)
 		TextColor3 = C.Faint,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(0, 94),
-		Size = UDim2.new(1, 0, 1, -(94 + BOTTOM_HEIGHT)),
+		Position = UDim2.fromOffset(0, LINES_TOP),
+		Size = UDim2.new(1, 0, 1, -(LINES_TOP + BOTTOM_HEIGHT)),
 		Parent = panel,
 	})
 
@@ -5838,7 +7227,7 @@ function Sell.new(ctx)
 				local stroke = UI.stroke()
 				local scale = UI.new("UIScale")
 				local badgeText, badgeFg, badgeBg = stockBadge(product)
-				local inCart = UI.pill("×0", Color3.new(1, 1, 1), C.Accent, {
+				local inCart = UI.pill("×0", C.OnAccent, C.Accent, {
 					Visible = false,
 					AnchorPoint = Vector2.new(1, 1),
 					Position = UDim2.new(1, -10, 1, -10),
@@ -5890,7 +7279,7 @@ function Sell.new(ctx)
 							Text = money(product.price),
 							FontFace = F.Heavy,
 							TextSize = 19,
-							TextColor3 = if soldOut then C.Faint else C.AccentHover,
+							TextColor3 = if soldOut then C.Faint else C.AccentText,
 							Position = UDim2.fromOffset(12, 80),
 							Size = UDim2.new(1, -70, 0, 22),
 						}),
@@ -6232,7 +7621,7 @@ function Sell.new(ctx)
 		elseif action == "charge" and customer then
 			UI.setEnabled(charge, false)
 			charge.Text = "Sending…"
-			local ok, result = Api.call("checkout.start", payload(), discount, customer.userId)
+			local ok, result = Api.call("checkout.start", payload(), discount, customer.userId, dining)
 			if ok then
 				pending = { orderId = result.orderId, customer = result.customer, total = result.total }
 				showWaiting(true)
@@ -6262,7 +7651,12 @@ function Sell.new(ctx)
 		showWaiting(false)
 		if update.status == "paid" then
 			local sale = update.sale
-			Toasts.show(string.format("Paid %s · %s", money(sale.total), sale.receipt), "success")
+			Toasts.show(
+				if sale.orderNumber
+					then string.format("Paid %s · order %d", money(sale.total), sale.orderNumber)
+					else string.format("Paid %s · %s", money(sale.total), sale.receipt),
+				"success"
+			)
 			table.clear(cart)
 			discount = 0
 			customer = nil
@@ -6327,7 +7721,7 @@ return Sell
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="45">
+          <Item class="ModuleScript" referent="51">
             <Properties>
               <string name="Name">Shift</string>
               <string name="Source"><![CDATA[-- Shift: open it to take payments, watch the live X report, close it for the Z report.
@@ -6619,7 +8013,7 @@ return Shift
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="46">
+        <Item class="ModuleScript" referent="52">
           <Properties>
             <string name="Name">State</string>
             <string name="Source"><![CDATA[-- Client state with a change signal: State.set("register", value) fires State.changed("register").
@@ -6635,6 +8029,7 @@ local State = {
 	catalogue = {},
 	byId = {},
 	register = nil,
+	orders = {},
 }
 
 State.changed = Signal.new()
@@ -6655,43 +8050,19 @@ return State
 ]]></string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="47">
+        <Item class="Folder" referent="53">
           <Properties>
             <string name="Name">UI</string>
           </Properties>
-          <Item class="ModuleScript" referent="48">
+          <Item class="ModuleScript" referent="54">
             <Properties>
               <string name="Name">Theme</string>
               <string name="Source"><![CDATA[-- Design tokens. Change these to restyle the whole POS.
 
 local Theme = {}
 
-local rgb = Color3.fromRGB
-
-Theme.Colors = {
-	Backdrop = rgb(5, 6, 9),
-	Bg = rgb(13, 15, 20),
-	Panel = rgb(20, 23, 31),
-	Raised = rgb(28, 32, 43),
-	RaisedHover = rgb(36, 41, 55),
-	Border = rgb(44, 50, 66),
-	Text = rgb(236, 239, 245),
-	Muted = rgb(146, 153, 170),
-	Faint = rgb(98, 105, 124),
-	Accent = rgb(92, 132, 255),
-	AccentHover = rgb(118, 152, 255),
-	AccentSoft = rgb(34, 44, 78),
-	Success = rgb(46, 204, 113),
-	SuccessHover = rgb(76, 220, 138),
-	SuccessSoft = rgb(22, 58, 41),
-	Warning = rgb(242, 173, 61),
-	WarningSoft = rgb(66, 50, 22),
-	Danger = rgb(235, 87, 87),
-	DangerHover = rgb(245, 115, 115),
-	DangerSoft = rgb(70, 28, 32),
-	Paper = rgb(250, 248, 242),
-	Ink = rgb(28, 28, 32),
-}
+-- Colours come from the shared palette so the POS window, kiosks and world screens match.
+Theme.Colors = require(game:GetService("ReplicatedStorage"):WaitForChild("POS"):WaitForChild("Palette"))
 
 local family = "rbxasset://fonts/families/BuilderSans.json"
 local mono = "rbxasset://fonts/families/RobotoMono.json"
@@ -6719,7 +8090,7 @@ return Theme
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="49">
+          <Item class="ModuleScript" referent="55">
             <Properties>
               <string name="Name">Toasts</string>
               <string name="Source"><![CDATA[-- Stacked notifications at the top of the screen.
@@ -6781,7 +8152,7 @@ function Toasts.show(text: string, kind: string?)
 				Text = style.icon,
 				FontFace = F.Heavy,
 				TextSize = 14,
-				TextColor3 = C.Bg,
+				TextColor3 = C.Panel,
 				BackgroundColor3 = style.colour,
 				Size = UDim2.fromOffset(22, 22),
 				Children = { UI.corner(Theme.Radius.Pill) },
@@ -6811,7 +8182,7 @@ return Toasts
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="50">
+          <Item class="ModuleScript" referent="56">
             <Properties>
               <string name="Name">UI</string>
               <string name="Source"><![CDATA[-- A small declarative UI kit.
@@ -6911,11 +8282,12 @@ function UI.text(props: { [string]: any }): TextLabel
 end
 
 local STYLES = {
-	primary = { bg = C.Accent, hover = C.AccentHover, text = Color3.new(1, 1, 1) },
-	success = { bg = C.Success, hover = C.SuccessHover, text = Color3.fromRGB(8, 30, 18) },
-	danger = { bg = C.Danger, hover = C.DangerHover, text = Color3.new(1, 1, 1) },
+	primary = { bg = C.Accent, hover = C.AccentHover, text = C.OnAccent },
+	success = { bg = C.Success, hover = C.SuccessHover, text = C.OnSuccess },
+	danger = { bg = C.Danger, hover = C.DangerHover, text = C.OnDanger },
 	secondary = { bg = C.Raised, hover = C.RaisedHover, text = C.Text, stroke = true },
 	ghost = { bg = C.Panel, hover = C.Raised, text = C.Muted },
+	dark = { bg = C.Text, hover = C.Muted, text = C.Panel },
 }
 
 -- props: Text, Style, Size, Position, AnchorPoint, TextSize, LayoutOrder, Name, OnClick, Font
@@ -7180,16 +8552,1262 @@ return UI
             </Properties>
           </Item>
         </Item>
+        <Item class="Folder" referent="57">
+          <Properties>
+            <string name="Name">World</string>
+          </Properties>
+          <Item class="ModuleScript" referent="58">
+            <Properties>
+              <string name="Name">Kiosk</string>
+              <string name="Source"><![CDATA[-- The self-order kiosk touchscreen. Each player draws every kiosk on their own screen
+-- (a SurfaceGui in PlayerGui adorned to the kiosk's Screen part), so taps are theirs.
+--
+-- Steps: start -> where would you like to eat? -> menu -> your order -> pay -> order number.
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Config = require(Shared.Config)
+local Format = require(Shared.Format)
+local Pricing = require(Shared.Pricing)
+
+local Client = script.Parent.Parent
+local Api = require(Client.Api)
+local State = require(Client.State)
+local UI = require(Client.UI.UI)
+local Theme = require(Client.UI.Theme)
+local Toasts = require(Client.UI.Toasts)
+
+local C, F = Theme.Colors, Theme.Fonts
+
+local Kiosk = {}
+
+local CANVAS = Vector2.new(620, 900)
+local PING_EVERY = 8
+local DINING_ICONS = { ["Eat in"] = "🍽", ["Take away"] = "🛍" }
+
+local player = Players.LocalPlayer
+local kiosks = {}
+
+local function money(n: number): string
+	return Format.money(n, Config.Currency.Symbol)
+end
+
+local function balance(): number?
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local stat = leaderstats and leaderstats:FindFirstChild(Config.Currency.StatName)
+	return if stat and (stat:IsA("IntValue") or stat:IsA("NumberValue")) then stat.Value else nil
+end
+
+local function big(props)
+	props.TextSize = props.TextSize or 30
+	props.Radius = props.Radius or Theme.Radius.Large
+	return UI.button(props)
+end
+
+local function mount(instance: Instance)
+	local screen = instance:FindFirstChild("Screen", true)
+	if not screen or not screen:IsA("BasePart") or kiosks[instance] then
+		return
+	end
+
+	local self = {
+		id = instance:GetAttribute("KioskId"),
+		name = instance:GetAttribute("KioskName") or "Kiosk",
+		step = "start",
+		dining = nil :: string?,
+		category = Config.Categories[1],
+		cart = {} :: { { productId: string, qty: number } },
+		lastPing = 0,
+		lastTap = 0,
+		done = nil :: any,
+	}
+	kiosks[instance] = self
+
+	local gui = UI.new("SurfaceGui", {
+		Name = "RoPOSKiosk",
+		Adornee = screen,
+		Face = Enum.NormalId.Front,
+		SizingMode = Enum.SurfaceGuiSizingMode.FixedSize,
+		CanvasSize = CANVAS,
+		LightInfluence = 0,
+		Brightness = 1.3,
+		MaxDistance = 40,
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = player:WaitForChild("PlayerGui"),
+	})
+	local root = UI.new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.Panel, Parent = gui })
+
+	local render -- forward
+
+	local function occupiedByOther(): boolean
+		local occupant = instance:GetAttribute("Occupant")
+		return typeof(occupant) == "number" and occupant ~= 0 and occupant ~= player.UserId
+	end
+
+	local function reset()
+		self.step = "start"
+		self.dining = nil
+		self.cart = {}
+		self.category = Config.Categories[1]
+		render()
+	end
+
+	-- Every tap keeps the kiosk ours; the server frees it after Config.Kiosk.IdleTimeout.
+	local function tap()
+		self.lastTap = os.clock()
+		if self.step ~= "start" and os.clock() - self.lastPing > PING_EVERY then
+			self.lastPing = os.clock()
+			task.spawn(Api.call, "kiosk.ping", self.id)
+		end
+	end
+
+	local function go(step: string)
+		tap()
+		self.step = step
+		render()
+	end
+
+	local function cancel()
+		Api.call("kiosk.cancel", self.id)
+		reset()
+	end
+
+	local function totals(): Pricing.Totals
+		local lines = {}
+		for _, line in self.cart do
+			local product = State.byId[line.productId]
+			if product and product.active then
+				table.insert(lines, {
+					productId = product.id,
+					name = product.name,
+					unitPrice = product.price,
+					qty = line.qty,
+					taxRate = if Config.Tax.Enabled then product.taxRate else 0,
+				})
+			end
+		end
+		return Pricing.priceLines(lines, { discountPct = 0, taxInclusive = Config.Tax.Inclusive })
+	end
+
+	local function qtyIn(id: string): number
+		for _, line in self.cart do
+			if line.productId == id then
+				return line.qty
+			end
+		end
+		return 0
+	end
+
+	local function setQty(id: string, qty: number)
+		tap()
+		local product = State.byId[id]
+		if not product then
+			return
+		end
+		if product.stock ~= nil and qty > product.stock then
+			Toasts.show(string.format("Only %d %s left", product.stock, product.name), "warning")
+			return
+		end
+		if qty > Config.Checkout.MaxQty then
+			return
+		end
+		for i, line in self.cart do
+			if line.productId == id then
+				if qty <= 0 then
+					table.remove(self.cart, i)
+				else
+					line.qty = qty
+				end
+				render()
+				return
+			end
+		end
+		if qty > 0 and #self.cart < Config.Checkout.MaxLines then
+			table.insert(self.cart, { productId = id, qty = qty })
+		end
+		render()
+	end
+
+	local function start()
+		tap()
+		local ok, result = Api.call("kiosk.start", self.id)
+		if not ok then
+			Toasts.show(result, "warning")
+			return
+		end
+		State.set("catalogue", result.catalogue)
+		self.lastPing = os.clock()
+		go(if #Config.Orders.DiningOptions > 0 then "dining" else "menu")
+	end
+
+	local function pay()
+		local t = totals()
+		self.step = "paying"
+		render()
+		local ok, result = Api.call("kiosk.checkout", self.id, self.cart, self.dining, t.total)
+		if ok then
+			self.done = result
+			self.step = "done"
+			render()
+			local finished = result
+			task.delay(12, function()
+				if self.done == finished and self.step == "done" then
+					reset()
+				end
+			end)
+		else
+			Toasts.show(result, "error")
+			self.step = "basket"
+			render()
+		end
+	end
+
+	-- Shared pieces ---------------------------------------------------------------
+
+	local function topBar(parent: Instance, title: string)
+		local bar = UI.new("Frame", {
+			BackgroundColor3 = C.Accent,
+			Size = UDim2.new(1, 0, 0, 92),
+			Parent = parent,
+		})
+		UI.text({
+			Text = Config.Store.Name,
+			FontFace = F.Heavy,
+			TextSize = 30,
+			TextColor3 = C.OnAccent,
+			Position = UDim2.fromOffset(28, 14),
+			Size = UDim2.new(1, -170, 0, 34),
+			Parent = bar,
+		})
+		UI.text({
+			Text = title,
+			FontFace = F.Medium,
+			TextSize = 20,
+			TextColor3 = C.OnAccent,
+			Position = UDim2.fromOffset(28, 50),
+			Size = UDim2.new(1, -170, 0, 26),
+			Parent = bar,
+		})
+		UI.button({
+			Text = "Cancel",
+			Style = "dark",
+			TextSize = 20,
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -22, 0.5, 0),
+			Size = UDim2.fromOffset(120, 52),
+			Radius = Theme.Radius.Pill,
+			Parent = bar,
+			OnClick = cancel,
+		})
+		return bar
+	end
+
+	-- Steps ------------------------------------------------------------------------
+
+	local function drawStart()
+		UI.new("Frame", {
+			BackgroundColor3 = C.Accent,
+			Size = UDim2.fromScale(1, 0.46),
+			Parent = root,
+			Children = {
+				UI.text({
+					Text = Config.Store.Name,
+					FontFace = F.Heavy,
+					TextSize = 64,
+					TextColor3 = C.OnAccent,
+					TextXAlignment = Enum.TextXAlignment.Center,
+					Position = UDim2.fromScale(0, 0.3),
+					Size = UDim2.new(1, 0, 0, 76),
+				}),
+				UI.text({
+					Text = "Order and pay here",
+					FontFace = F.Medium,
+					TextSize = 30,
+					TextColor3 = C.OnAccent,
+					TextXAlignment = Enum.TextXAlignment.Center,
+					Position = UDim2.fromScale(0, 0.58),
+					Size = UDim2.new(1, 0, 0, 40),
+				}),
+			},
+		})
+		if occupiedByOther() then
+			UI.text({
+				Text = "Someone is ordering",
+				FontFace = F.Heavy,
+				TextSize = 40,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				Position = UDim2.fromScale(0, 0.58),
+				Size = UDim2.new(1, 0, 0, 50),
+				Parent = root,
+			})
+			UI.text({
+				Text = "Please wait or use another kiosk",
+				TextColor3 = C.Muted,
+				TextSize = 26,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				Position = UDim2.fromScale(0, 0.66),
+				Size = UDim2.new(1, 0, 0, 34),
+				Parent = root,
+			})
+			return
+		end
+		local button = big({
+			Text = "Touch to start",
+			Style = "primary",
+			TextSize = 36,
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.fromScale(0.5, 0.6),
+			Size = UDim2.new(0.8, 0, 0, 110),
+			Parent = root,
+			OnClick = start,
+		})
+		-- A gentle pulse so the kiosk looks alive from across the room.
+		local scale = button:FindFirstChildOfClass("UIScale")
+		task.spawn(function()
+			while button.Parent and scale do
+				UI.tween(scale, { Scale = 1.04 }, TweenInfo.new(0.9, Enum.EasingStyle.Sine))
+				task.wait(0.9)
+				UI.tween(scale, { Scale = 1 }, TweenInfo.new(0.9, Enum.EasingStyle.Sine))
+				task.wait(0.9)
+			end
+		end)
+		UI.text({
+			Text = string.format("Pay with your %s · %s", Config.Currency.StatName, self.name),
+			TextColor3 = C.Faint,
+			TextSize = 22,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.new(0, 0, 1, -30),
+			Size = UDim2.new(1, 0, 0, 30),
+			Parent = root,
+		})
+	end
+
+	local function drawDining()
+		topBar(root, "Step 1 of 3")
+		UI.text({
+			Text = "Where would you like to eat?",
+			FontFace = F.Heavy,
+			TextSize = 40,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Position = UDim2.fromOffset(30, 170),
+			Size = UDim2.new(1, -60, 0, 110),
+			Parent = root,
+		})
+		local options = Config.Orders.DiningOptions
+		for i, option in options do
+			local card = UI.new("TextButton", {
+				Text = "",
+				AutoButtonColor = false,
+				BackgroundColor3 = C.Raised,
+				AnchorPoint = Vector2.new(0.5, 0),
+				Position = UDim2.new((i - 0.5) / #options, 0, 0, 330),
+				Size = UDim2.new(1 / #options, -40, 0, 300),
+				Parent = root,
+				Children = {
+					UI.corner(Theme.Radius.Large),
+					UI.stroke(C.Border, 2),
+					UI.text({
+						Text = DINING_ICONS[option] or "•",
+						TextSize = 110,
+						TextXAlignment = Enum.TextXAlignment.Center,
+						Position = UDim2.fromOffset(0, 40),
+						Size = UDim2.new(1, 0, 0, 140),
+					}),
+					UI.text({
+						Text = option,
+						FontFace = F.Heavy,
+						TextSize = 34,
+						TextXAlignment = Enum.TextXAlignment.Center,
+						Position = UDim2.fromOffset(0, 210),
+						Size = UDim2.new(1, 0, 0, 44),
+					}),
+				},
+			})
+			card.MouseEnter:Connect(function()
+				UI.tween(card, { BackgroundColor3 = C.AccentSoft })
+			end)
+			card.MouseLeave:Connect(function()
+				UI.tween(card, { BackgroundColor3 = C.Raised })
+			end)
+			card.Activated:Connect(function()
+				self.dining = option
+				go("menu")
+			end)
+		end
+	end
+
+	local function drawMenu()
+		topBar(root, (if self.dining then self.dining .. " · " else "") .. "Choose your items")
+
+		-- Category rail
+		local rail = UI.new("Frame", {
+			BackgroundColor3 = C.Raised,
+			Position = UDim2.fromOffset(0, 92),
+			Size = UDim2.new(0, 170, 1, -92 - 120),
+			Parent = root,
+			Children = { UI.padding(14, 12), UI.list(10) },
+		})
+		for i, category in Config.Categories do
+			local selected = category == self.category
+			local chip = UI.button({
+				Text = category,
+				Style = if selected then "primary" else "ghost",
+				TextSize = 22,
+				Size = UDim2.new(1, 0, 0, 64),
+				LayoutOrder = i,
+				Radius = Theme.Radius.Medium,
+				Parent = rail,
+				OnClick = function()
+					self.category = category
+					go("menu")
+				end,
+			})
+			chip.TextWrapped = true
+		end
+
+		-- Item grid
+		local grid = UI.scroll({
+			Position = UDim2.fromOffset(170, 92),
+			Size = UDim2.new(1, -170, 1, -92 - 120),
+			ScrollBarThickness = 8,
+			Parent = root,
+			Children = {
+				UI.padding(16),
+				UI.new("UIGridLayout", {
+					CellSize = UDim2.new(0.5, -8, 0, 250),
+					CellPadding = UDim2.fromOffset(16, 16),
+					SortOrder = Enum.SortOrder.LayoutOrder,
+				}),
+			},
+		})
+		for index, product in State.catalogue do
+			if product.active and product.category == self.category then
+				local soldOut = product.stock ~= nil and product.stock <= 0
+				local qty = qtyIn(product.id)
+				local stroke = UI.stroke(if qty > 0 then C.Accent else C.Border, if qty > 0 then 3 else 1)
+				local card = UI.new("TextButton", {
+					Text = "",
+					AutoButtonColor = false,
+					BackgroundColor3 = C.Panel,
+					LayoutOrder = index,
+					Parent = grid,
+					Children = {
+						UI.corner(Theme.Radius.Large),
+						stroke,
+						UI.new("Frame", {
+							BackgroundColor3 = product.colour,
+							BackgroundTransparency = if soldOut then 0.6 else 0,
+							AnchorPoint = Vector2.new(0.5, 0),
+							Position = UDim2.new(0.5, 0, 0, 22),
+							Size = UDim2.fromOffset(100, 100),
+							Children = {
+								UI.corner(Theme.Radius.Pill),
+								UI.text({
+									Text = string.upper(string.sub(product.name, 1, 1)),
+									FontFace = F.Heavy,
+									TextSize = 46,
+									TextColor3 = C.Panel,
+									TextXAlignment = Enum.TextXAlignment.Center,
+									Size = UDim2.fromScale(1, 1),
+								}),
+							},
+						}),
+						UI.text({
+							Text = product.name,
+							FontFace = F.Bold,
+							TextSize = 24,
+							TextWrapped = true,
+							TextColor3 = if soldOut then C.Faint else C.Text,
+							TextXAlignment = Enum.TextXAlignment.Center,
+							Position = UDim2.fromOffset(10, 134),
+							Size = UDim2.new(1, -20, 0, 56),
+						}),
+						UI.text({
+							Text = if soldOut then "Sold out" else money(product.price),
+							FontFace = F.Heavy,
+							TextSize = 26,
+							TextColor3 = if soldOut then C.Danger else C.AccentText,
+							TextXAlignment = Enum.TextXAlignment.Center,
+							Position = UDim2.fromOffset(0, 196),
+							Size = UDim2.new(1, 0, 0, 32),
+						}),
+						if qty > 0
+							then UI.pill("×" .. qty, C.OnAccent, C.Accent, {
+								AnchorPoint = Vector2.new(1, 0),
+								Position = UDim2.new(1, -12, 0, 12),
+								Size = UDim2.fromOffset(0, 34),
+							})
+							else nil,
+					},
+				})
+				card.Activated:Connect(function()
+					if not soldOut then
+						setQty(product.id, qtyIn(product.id) + 1)
+					end
+				end)
+			end
+		end
+
+		-- Order bar
+		local t = totals()
+		local items = 0
+		for _, line in t.lines do
+			items += line.qty
+		end
+		local bar = UI.new("Frame", {
+			BackgroundColor3 = C.Panel,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.new(1, 0, 0, 120),
+			Parent = root,
+			Children = { UI.stroke(C.Border, 1) },
+		})
+		UI.text({
+			Text = if items > 0
+				then string.format("Your order · %d item%s", items, if items == 1 then "" else "s")
+				else "Your order is empty",
+			TextSize = 22,
+			TextColor3 = C.Muted,
+			Position = UDim2.fromOffset(28, 22),
+			Size = UDim2.new(0.5, 0, 0, 28),
+			Parent = bar,
+		})
+		UI.text({
+			Text = money(t.total),
+			FontFace = F.Heavy,
+			TextSize = 40,
+			Position = UDim2.fromOffset(28, 54),
+			Size = UDim2.new(0.5, 0, 0, 46),
+			Parent = bar,
+		})
+		local view = big({
+			Text = "View order",
+			Style = "primary",
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -24, 0.5, 0),
+			Size = UDim2.fromOffset(250, 80),
+			Parent = bar,
+			OnClick = function()
+				go("basket")
+			end,
+		})
+		if items == 0 then
+			UI.setEnabled(view, false)
+		end
+	end
+
+	local function drawBasket()
+		topBar(
+			root,
+			"Step " .. (if #Config.Orders.DiningOptions > 0 then "3 of 3" else "2 of 2") .. " · Check your order"
+		)
+		local t = totals()
+		local list = UI.scroll({
+			Position = UDim2.fromOffset(0, 92),
+			Size = UDim2.new(1, 0, 1, -92 - 300),
+			ScrollBarThickness = 8,
+			Parent = root,
+			Children = { UI.padding(20, 24), UI.list(12) },
+		})
+		for i, line in t.lines do
+			local product = State.byId[line.productId]
+			local row = UI.new("Frame", {
+				BackgroundColor3 = C.Raised,
+				Size = UDim2.new(1, 0, 0, 96),
+				LayoutOrder = i,
+				Parent = list,
+				Children = {
+					UI.corner(Theme.Radius.Medium),
+					UI.new("Frame", {
+						BackgroundColor3 = if product then product.colour else C.Accent,
+						Position = UDim2.new(0, 16, 0.5, -26),
+						Size = UDim2.fromOffset(52, 52),
+						Children = { UI.corner(Theme.Radius.Pill) },
+					}),
+					UI.text({
+						Text = line.name or line.productId,
+						FontFace = F.Bold,
+						TextSize = 24,
+						Position = UDim2.fromOffset(84, 16),
+						Size = UDim2.new(1, -330, 0, 30),
+					}),
+					UI.text({
+						Text = money(line.unitPrice) .. " each",
+						TextSize = 19,
+						TextColor3 = C.Muted,
+						Position = UDim2.fromOffset(84, 50),
+						Size = UDim2.new(1, -330, 0, 26),
+					}),
+					UI.text({
+						Text = money(line.unitPrice * line.qty),
+						FontFace = F.Heavy,
+						TextSize = 24,
+						TextXAlignment = Enum.TextXAlignment.Right,
+						AnchorPoint = Vector2.new(1, 0.5),
+						Position = UDim2.new(1, -16, 0.5, 0),
+						Size = UDim2.fromOffset(90, 30),
+					}),
+				},
+			})
+			local stepper = UI.new("Frame", {
+				BackgroundColor3 = C.Panel,
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -116, 0.5, 0),
+				Size = UDim2.fromOffset(150, 56),
+				Parent = row,
+				Children = { UI.corner(Theme.Radius.Pill), UI.stroke(C.Border) },
+			})
+			UI.button({
+				Text = "−",
+				Style = "ghost",
+				TextSize = 30,
+				Size = UDim2.fromOffset(52, 56),
+				Radius = Theme.Radius.Pill,
+				Parent = stepper,
+				OnClick = function()
+					setQty(line.productId, line.qty - 1)
+				end,
+			})
+			UI.text({
+				Text = tostring(line.qty),
+				FontFace = F.Heavy,
+				TextSize = 26,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				Position = UDim2.fromOffset(52, 0),
+				Size = UDim2.fromOffset(46, 56),
+				Parent = stepper,
+			})
+			UI.button({
+				Text = "+",
+				Style = "ghost",
+				TextSize = 30,
+				Position = UDim2.fromOffset(98, 0),
+				Size = UDim2.fromOffset(52, 56),
+				Radius = Theme.Radius.Pill,
+				Parent = stepper,
+				OnClick = function()
+					setQty(line.productId, line.qty + 1)
+				end,
+			})
+		end
+		if #t.lines == 0 then
+			go("menu")
+			return
+		end
+
+		local panel = UI.new("Frame", {
+			BackgroundColor3 = C.Panel,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.new(1, 0, 0, 300),
+			Parent = root,
+			Children = { UI.stroke(C.Border) },
+		})
+		local wallet = balance()
+		local enough = wallet ~= nil and wallet >= t.total
+		UI.text({
+			Text = "Total",
+			FontFace = F.Bold,
+			TextSize = 30,
+			Position = UDim2.fromOffset(28, 22),
+			Size = UDim2.new(0.5, 0, 0, 40),
+			Parent = panel,
+		})
+		UI.text({
+			Text = money(t.total),
+			FontFace = F.Heavy,
+			TextSize = 46,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -28, 0, 16),
+			Size = UDim2.new(0.5, 0, 0, 52),
+			Parent = panel,
+		})
+		UI.text({
+			Text = if wallet
+				then string.format(
+					"Your %s: %s → %s",
+					Config.Currency.StatName,
+					money(wallet),
+					money(wallet - t.total)
+				)
+				else "Loading your balance…",
+			TextSize = 20,
+			TextColor3 = if enough then C.Muted else C.Danger,
+			Position = UDim2.fromOffset(28, 76),
+			Size = UDim2.new(1, -56, 0, 26),
+			Parent = panel,
+		})
+		big({
+			Text = "Add more",
+			Style = "secondary",
+			Position = UDim2.fromOffset(24, 130),
+			Size = UDim2.new(0.38, -24, 0, 120),
+			Parent = panel,
+			OnClick = function()
+				go("menu")
+			end,
+		})
+		local payButton = big({
+			Text = if enough then "Pay " .. money(t.total) else "Not enough " .. Config.Currency.StatName,
+			Style = "success",
+			TextSize = 34,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -24, 0, 130),
+			Size = UDim2.new(0.62, -24, 0, 120),
+			Parent = panel,
+			OnClick = pay,
+		})
+		if not enough then
+			UI.setEnabled(payButton, false)
+		end
+	end
+
+	local function drawPaying()
+		UI.text({
+			Text = "Paying…",
+			FontFace = F.Heavy,
+			TextSize = 48,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Position = UDim2.fromScale(0, 0.42),
+			Size = UDim2.new(1, 0, 0, 60),
+			Parent = root,
+		})
+		UI.text({
+			Text = "Taking " .. money(totals().total) .. " from your " .. Config.Currency.StatName,
+			TextColor3 = C.Muted,
+			TextSize = 24,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Position = UDim2.fromScale(0, 0.5),
+			Size = UDim2.new(1, 0, 0, 34),
+			Parent = root,
+		})
+	end
+
+	local function drawDone()
+		local sale = self.done
+		UI.new("Frame", {
+			BackgroundColor3 = C.Success,
+			Size = UDim2.fromScale(1, 0.4),
+			Parent = root,
+			Children = {
+				UI.text({
+					Text = "✓",
+					FontFace = F.Heavy,
+					TextSize = 110,
+					TextColor3 = C.OnSuccess,
+					TextXAlignment = Enum.TextXAlignment.Center,
+					Position = UDim2.fromScale(0, 0.18),
+					Size = UDim2.new(1, 0, 0, 120),
+				}),
+				UI.text({
+					Text = "Thank you, " .. player.DisplayName .. "!",
+					FontFace = F.Heavy,
+					TextSize = 34,
+					TextColor3 = C.OnSuccess,
+					TextXAlignment = Enum.TextXAlignment.Center,
+					Position = UDim2.fromScale(0, 0.68),
+					Size = UDim2.new(1, 0, 0, 44),
+				}),
+			},
+		})
+		UI.text({
+			Text = "Your order number",
+			TextColor3 = C.Muted,
+			TextSize = 28,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Position = UDim2.fromScale(0, 0.45),
+			Size = UDim2.new(1, 0, 0, 36),
+			Parent = root,
+		})
+		UI.text({
+			Text = if sale.orderNumber then tostring(sale.orderNumber) else sale.receipt,
+			FontFace = F.Heavy,
+			TextSize = 170,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Position = UDim2.fromScale(0, 0.5),
+			Size = UDim2.new(1, 0, 0, 190),
+			Parent = root,
+		})
+		UI.text({
+			Text = (if sale.dining then sale.dining .. " · " else "") .. "Watch the board for your number",
+			TextColor3 = C.Muted,
+			TextSize = 24,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Position = UDim2.fromScale(0, 0.74),
+			Size = UDim2.new(1, 0, 0, 32),
+			Parent = root,
+		})
+		big({
+			Text = "Done",
+			Style = "primary",
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = UDim2.new(0.5, 0, 1, -40),
+			Size = UDim2.new(0.6, 0, 0, 90),
+			Parent = root,
+			OnClick = reset,
+		})
+	end
+
+	function render()
+		UI.clear(root)
+		if self.step ~= "start" and self.step ~= "done" and occupiedByOther() then
+			self.step = "start"
+		end
+		local draw = ({
+			start = drawStart,
+			dining = drawDining,
+			menu = drawMenu,
+			basket = drawBasket,
+			paying = drawPaying,
+			done = drawDone,
+		})[self.step]
+		draw()
+	end
+
+	function self.closed(reason: string?)
+		if self.step ~= "start" and self.step ~= "done" then
+			if reason then
+				Toasts.show(reason, "info")
+			end
+			reset()
+		end
+	end
+
+	function self.refresh()
+		if self.step == "menu" or self.step == "basket" then
+			render()
+		end
+	end
+
+	instance:GetAttributeChangedSignal("Occupant"):Connect(function()
+		if self.step == "start" then
+			render()
+		end
+	end)
+
+	-- Back to the start screen when left alone (the server frees the kiosk too).
+	task.spawn(function()
+		while gui.Parent do
+			task.wait(2)
+			if
+				self.step ~= "start"
+				and self.step ~= "done"
+				and self.step ~= "paying"
+				and os.clock() - self.lastTap > Config.Kiosk.IdleTimeout
+			then
+				cancel()
+			end
+		end
+	end)
+
+	render()
+end
+
+function Kiosk.mount()
+	if not Config.Kiosk.Enabled then
+		return
+	end
+	for _, instance in CollectionService:GetTagged(Config.Tags.Kiosk) do
+		task.spawn(mount, instance)
+	end
+	CollectionService:GetInstanceAddedSignal(Config.Tags.Kiosk):Connect(function(instance)
+		task.spawn(mount, instance)
+	end)
+
+	Api.on("KioskClosed", function(payload)
+		for instance, kiosk in kiosks do
+			if kiosk.id == payload.id or instance:GetAttribute("KioskId") == payload.id then
+				kiosk.closed(payload.reason)
+			end
+		end
+	end)
+	State.changed:Connect(function(key)
+		if key == "catalogue" then
+			for _, kiosk in kiosks do
+				kiosk.refresh()
+			end
+		end
+	end)
+end
+
+return Kiosk
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="59">
+            <Properties>
+              <string name="Name">Kitchen</string>
+              <string name="Source"><![CDATA[-- The kitchen display: one ticket per order being prepared, oldest first, with a timer that
+-- turns amber then red. Staff tap Ready; ready orders wait in the strip at the bottom until
+-- staff tap Collected (or they clear by themselves). Everyone sees the tickets; only staff
+-- get the buttons.
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
+local Config = require(Shared.Config)
+local Roles = require(Shared.Roles)
+
+local Client = script.Parent.Parent
+local Api = require(Client.Api)
+local State = require(Client.State)
+local UI = require(Client.UI.UI)
+local Theme = require(Client.UI.Theme)
+local Toasts = require(Client.UI.Toasts)
+
+local C, F = Theme.Colors, Theme.Fonts
+
+local Kitchen = {}
+
+local PIXELS_PER_STUD = 100
+local MAX_TICKETS = 5
+
+local player = Players.LocalPlayer
+local displays = {}
+
+local function elapsed(placedAt: number): number
+	return math.max(0, os.time() - placedAt)
+end
+
+local function timerText(seconds: number): string
+	return string.format("%d:%02d", seconds // 60, seconds % 60)
+end
+
+local function ageColour(seconds: number): Color3
+	local late = Config.Orders.LateAfter
+	if seconds >= late[2] then
+		return C.Danger
+	elseif seconds >= late[1] then
+		return C.Warning
+	end
+	return C.Success
+end
+
+local function act(action: string, number: number)
+	local ok, err = Api.call(action, number)
+	if not ok then
+		Toasts.show(err, "error")
+	end
+end
+
+local function mount(instance: Instance)
+	local screen = instance:FindFirstChild("Screen", true)
+	if not screen or not screen:IsA("BasePart") or displays[instance] then
+		return
+	end
+	local canvas = Vector2.new(screen.Size.X, screen.Size.Y) * PIXELS_PER_STUD
+	local gui = UI.new("SurfaceGui", {
+		Name = "RoPOSKitchen",
+		Adornee = screen,
+		Face = Enum.NormalId.Front,
+		SizingMode = Enum.SurfaceGuiSizingMode.FixedSize,
+		CanvasSize = canvas,
+		LightInfluence = 0,
+		Brightness = 1.3,
+		MaxDistance = 60,
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = player:WaitForChild("PlayerGui"),
+	})
+	local root = UI.new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.Bg, Parent = gui })
+	local timers: { { label: TextLabel, bar: Frame, placedAt: number } } = {}
+	local unit = canvas.Y / 100
+
+	local function render()
+		UI.clear(root)
+		table.clear(timers)
+		local staff = State.role >= Roles.Cashier
+
+		local preparing, ready = {}, {}
+		for _, ticket in State.orders do
+			table.insert(if ticket.status == "ready" then ready else preparing, ticket)
+		end
+
+		-- Header
+		local header = UI.new("Frame", {
+			BackgroundColor3 = C.Text,
+			Size = UDim2.new(1, 0, 0, 11 * unit),
+			Parent = root,
+		})
+		UI.text({
+			Text = "Kitchen",
+			FontFace = F.Heavy,
+			TextSize = 6.5 * unit,
+			TextColor3 = C.Panel,
+			Position = UDim2.fromOffset(3 * unit, 0),
+			Size = UDim2.fromScale(0.4, 1),
+			Parent = header,
+		})
+		UI.text({
+			Text = string.format("%d preparing · %d ready", #preparing, #ready),
+			FontFace = F.Medium,
+			TextSize = 4.5 * unit,
+			TextColor3 = C.Faint,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -3 * unit, 0, 0),
+			Size = UDim2.fromScale(0.6, 1),
+			Parent = header,
+		})
+
+		-- Tickets
+		local strip = 17 * unit
+		local area = UI.new("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(2 * unit, 13 * unit),
+			Size = UDim2.new(1, -4 * unit, 1, -(15 * unit + strip)),
+			Parent = root,
+			Children = {
+				UI.new("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					Padding = UDim.new(0, 1.5 * unit),
+					SortOrder = Enum.SortOrder.LayoutOrder,
+				}),
+			},
+		})
+		if #preparing == 0 then
+			UI.text({
+				Text = "No orders waiting",
+				FontFace = F.Bold,
+				TextSize = 6 * unit,
+				TextColor3 = C.Faint,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				Size = UDim2.fromScale(1, 1),
+				Parent = area,
+			})
+		end
+		for index, ticket in preparing do
+			if index > MAX_TICKETS then
+				break
+			end
+			local age = elapsed(ticket.placedAt)
+			local card = UI.new("Frame", {
+				BackgroundColor3 = C.Panel,
+				Size = UDim2.new(1 / MAX_TICKETS, -1.3 * unit, 1, 0),
+				LayoutOrder = index,
+				Parent = area,
+				Children = { UI.corner(math.floor(1.5 * unit)), UI.stroke(C.Border, 1) },
+			})
+			local bar = UI.new("Frame", {
+				BackgroundColor3 = ageColour(age),
+				Size = UDim2.new(1, 0, 0, 13 * unit),
+				Parent = card,
+				Children = { UI.corner(math.floor(1.5 * unit)) },
+			})
+			UI.text({
+				Text = "#" .. ticket.number,
+				FontFace = F.Heavy,
+				TextSize = 7 * unit,
+				TextColor3 = C.Panel,
+				Position = UDim2.fromOffset(2 * unit, 0),
+				Size = UDim2.new(0.6, 0, 0, 8 * unit),
+				Parent = bar,
+			})
+			local timer = UI.text({
+				Text = timerText(age),
+				FontFace = F.Mono,
+				TextSize = 4.5 * unit,
+				TextColor3 = C.Panel,
+				TextXAlignment = Enum.TextXAlignment.Right,
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -2 * unit, 0, 1.5 * unit),
+				Size = UDim2.new(0.4, 0, 0, 6 * unit),
+				Parent = bar,
+			})
+			UI.text({
+				Text = ticket.source .. (if ticket.dining then " · " .. ticket.dining else ""),
+				FontFace = F.Medium,
+				TextSize = 3.4 * unit,
+				TextColor3 = C.Panel,
+				Position = UDim2.fromOffset(2 * unit, 8 * unit),
+				Size = UDim2.new(1, -4 * unit, 0, 4.5 * unit),
+				Parent = bar,
+			})
+			table.insert(timers, { label = timer, bar = bar, placedAt = ticket.placedAt })
+
+			local lines = UI.new("Frame", {
+				BackgroundTransparency = 1,
+				Position = UDim2.fromOffset(2 * unit, 15 * unit),
+				Size = UDim2.new(1, -4 * unit, 1, -(if staff then 31 else 17) * unit),
+				Parent = card,
+				Children = { UI.list(0.6 * unit) },
+			})
+			for i, line in ticket.lines do
+				UI.text({
+					Text = string.format("%d × %s", line.qty, line.name),
+					FontFace = F.Bold,
+					TextSize = 4 * unit,
+					TextWrapped = true,
+					AutomaticSize = Enum.AutomaticSize.Y,
+					Size = UDim2.new(1, 0, 0, 5 * unit),
+					LayoutOrder = i,
+					Parent = lines,
+				})
+			end
+			UI.text({
+				Text = ticket.customer,
+				TextSize = 3.2 * unit,
+				TextColor3 = C.Muted,
+				LayoutOrder = 100,
+				Size = UDim2.new(1, 0, 0, 4.5 * unit),
+				Parent = lines,
+			})
+			if staff then
+				UI.button({
+					Text = "Ready",
+					Style = "success",
+					TextSize = 5 * unit,
+					AnchorPoint = Vector2.new(0.5, 1),
+					Position = UDim2.new(0.5, 0, 1, -1.5 * unit),
+					Size = UDim2.new(1, -3 * unit, 0, 12 * unit),
+					Radius = UDim.new(0, math.floor(1.2 * unit)),
+					Parent = card,
+					OnClick = function()
+						act("orders.ready", ticket.number)
+					end,
+				})
+			end
+		end
+		if #preparing > MAX_TICKETS then
+			UI.pill("+" .. (#preparing - MAX_TICKETS) .. " more", C.Panel, C.Text, {
+				AnchorPoint = Vector2.new(1, 0),
+				Position = UDim2.new(1, -3 * unit, 0, 13.5 * unit),
+				Size = UDim2.fromOffset(0, 6 * unit),
+				Parent = root,
+			})
+		end
+
+		-- Ready strip
+		local readyBar = UI.new("Frame", {
+			BackgroundColor3 = C.SuccessSoft,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.new(1, 0, 0, strip),
+			Parent = root,
+			Children = {
+				UI.padding(math.floor(2 * unit)),
+				UI.list(
+					1.5 * unit,
+					Enum.FillDirection.Horizontal,
+					{ VerticalAlignment = Enum.VerticalAlignment.Center }
+				),
+			},
+		})
+		UI.text({
+			Text = "Ready for collection",
+			FontFace = F.Heavy,
+			TextSize = 4.2 * unit,
+			TextColor3 = C.Success,
+			AutomaticSize = Enum.AutomaticSize.X,
+			Size = UDim2.fromOffset(0, 10 * unit),
+			LayoutOrder = 0,
+			Parent = readyBar,
+		})
+		for i, ticket in ready do
+			if i > 6 then
+				break
+			end
+			local chip = UI.new("Frame", {
+				BackgroundColor3 = C.Panel,
+				AutomaticSize = Enum.AutomaticSize.X,
+				Size = UDim2.fromOffset(0, 12 * unit),
+				LayoutOrder = i,
+				Parent = readyBar,
+				Children = {
+					UI.corner(math.floor(1.2 * unit)),
+					UI.padding(0, math.floor(1.5 * unit)),
+					UI.list(unit, Enum.FillDirection.Horizontal, { VerticalAlignment = Enum.VerticalAlignment.Center }),
+					UI.text({
+						Text = "#" .. ticket.number,
+						FontFace = F.Heavy,
+						TextSize = 5 * unit,
+						TextColor3 = C.Success,
+						AutomaticSize = Enum.AutomaticSize.X,
+						Size = UDim2.fromOffset(0, 10 * unit),
+					}),
+				},
+			})
+			if staff then
+				UI.button({
+					Text = "Collected",
+					Style = "secondary",
+					TextSize = 3.4 * unit,
+					Size = UDim2.fromOffset(17 * unit, 8.5 * unit),
+					LayoutOrder = 2,
+					Parent = chip,
+					OnClick = function()
+						act("orders.collect", ticket.number)
+					end,
+				})
+				UI.button({
+					Text = "Recall",
+					Style = "ghost",
+					TextSize = 3.4 * unit,
+					Size = UDim2.fromOffset(12 * unit, 8.5 * unit),
+					LayoutOrder = 3,
+					Parent = chip,
+					OnClick = function()
+						act("orders.recall", ticket.number)
+					end,
+				})
+			end
+		end
+	end
+
+	displays[instance] = { render = render }
+	render()
+
+	-- Tick the timers without redrawing everything.
+	task.spawn(function()
+		while gui.Parent do
+			task.wait(1)
+			for _, timer in timers do
+				local age = elapsed(timer.placedAt)
+				timer.label.Text = timerText(age)
+				timer.bar.BackgroundColor3 = ageColour(age)
+			end
+		end
+	end)
+end
+
+function Kitchen.mount()
+	for _, instance in CollectionService:GetTagged(Config.Tags.Kitchen) do
+		task.spawn(mount, instance)
+	end
+	CollectionService:GetInstanceAddedSignal(Config.Tags.Kitchen):Connect(function(instance)
+		task.spawn(mount, instance)
+	end)
+	State.changed:Connect(function(key)
+		if key == "orders" or key == "role" then
+			for _, display in displays do
+				display.render()
+			end
+		end
+	end)
+end
+
+return Kitchen
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="51">
+  <Item class="Workspace" referent="60">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Part" referent="52">
+    <Item class="Part" referent="61">
       <Properties>
         <string name="Name">Baseplate</string>
         <bool name="Anchored">true</bool>
@@ -7210,7 +9828,7 @@ return UI
         <token name="TopSurface">0</token>
       </Properties>
     </Item>
-    <Item class="SpawnLocation" referent="53">
+    <Item class="SpawnLocation" referent="62">
       <Properties>
         <string name="Name">SpawnLocation</string>
         <bool name="Anchored">true</bool>

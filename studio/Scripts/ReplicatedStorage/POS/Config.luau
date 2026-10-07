@@ -76,14 +76,41 @@ Config.Data = {
 	FlushInterval = 20, -- seconds between batched DataStore writes
 }
 
+Config.Orders = {
+	-- Every paid sale gets an order number and a ticket on the kitchen display.
+	Enabled = true,
+	-- Asked at the kiosk and on the till. Use {} to not ask.
+	DiningOptions = { "Eat in", "Take away" },
+	-- Seconds a ready order stays on the status board before it is cleared.
+	ReadyClearAfter = 120,
+	-- Ticket colours on the kitchen display: amber after this many seconds, red after the second.
+	LateAfter = { 120, 300 },
+}
+
+Config.Kiosk = {
+	Enabled = true,
+	-- The customer must stand within this distance to use a kiosk (about 3 m).
+	Range = 11,
+	-- A kiosk returns to its start screen after this many seconds without a tap.
+	IdleTimeout = 60,
+}
+
 Config.Demo = {
-	-- Build a shop counter if the place has no register tagged "POSRegister".
+	-- Build a demo restaurant (till, kiosks, kitchen display, boards) if the place has no register.
 	SpawnRegister = true,
 	-- Create simple item Tools for products that have no Tool in ServerStorage.POSItems.
 	CreateItemTools = true,
 }
 
-Config.RegisterTag = "POSRegister"
+-- CollectionService tags. Tag a Model or Part to turn it into that piece of equipment.
+Config.Tags = {
+	Register = "POSRegister", -- staff till with a customer "Your order" screen
+	Kiosk = "POSKiosk", -- self-order touchscreen
+	Kitchen = "POSKitchenDisplay", -- kitchen display: tickets with a Ready button for staff
+	OrderBoard = "POSOrderBoard", -- "Preparing" and "Ready" order numbers
+	MenuBoard = "POSMenuBoard", -- menu with live prices (attribute Category = one category)
+}
+Config.RegisterTag = Config.Tags.Register
 
 Config.Categories = { "Snacks", "Gear", "Tools", "Cosmetics" }
 

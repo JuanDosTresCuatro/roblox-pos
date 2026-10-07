@@ -95,11 +95,12 @@ function UI.text(props: { [string]: any }): TextLabel
 end
 
 local STYLES = {
-	primary = { bg = C.Accent, hover = C.AccentHover, text = Color3.new(1, 1, 1) },
-	success = { bg = C.Success, hover = C.SuccessHover, text = Color3.fromRGB(8, 30, 18) },
-	danger = { bg = C.Danger, hover = C.DangerHover, text = Color3.new(1, 1, 1) },
+	primary = { bg = C.Accent, hover = C.AccentHover, text = C.OnAccent },
+	success = { bg = C.Success, hover = C.SuccessHover, text = C.OnSuccess },
+	danger = { bg = C.Danger, hover = C.DangerHover, text = C.OnDanger },
 	secondary = { bg = C.Raised, hover = C.RaisedHover, text = C.Text, stroke = true },
 	ghost = { bg = C.Panel, hover = C.Raised, text = C.Muted },
+	dark = { bg = C.Text, hover = C.Muted, text = C.Panel },
 }
 
 -- props: Text, Style, Size, Position, AnchorPoint, TextSize, LayoutOrder, Name, OnClick, Font

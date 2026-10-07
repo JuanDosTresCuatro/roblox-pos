@@ -11,6 +11,7 @@ local State = {
 	catalogue = {},
 	byId = {},
 	register = nil,
+	orders = {},
 }
 
 State.changed = Signal.new()

@@ -24,6 +24,7 @@ type Screen = { frame: GuiObject, show: (() -> ())? }
 
 local TABS = {
 	{ id = "sell", label = "Sell", icon = "🛒", role = Roles.Cashier, module = "Sell" },
+	{ id = "orders", label = "Orders", icon = "🔔", role = Roles.Cashier, module = "Orders" },
 	{ id = "sales", label = "Sales", icon = "🧾", role = Roles.Cashier, module = "Sales" },
 	{ id = "shift", label = "Shift", icon = "⏱", role = Roles.Cashier, module = "Shift" },
 	{ id = "products", label = "Products", icon = "📦", role = Roles.Manager, module = "Products" },
@@ -208,14 +209,14 @@ local function header(): Frame
 				Text = string.sub(Config.Store.Name, 1, 1),
 				FontFace = F.Heavy,
 				TextSize = 22,
-				TextColor3 = Color3.new(1, 1, 1),
+				TextColor3 = C.OnAccent,
 				BackgroundColor3 = C.Accent,
 				Size = UDim2.fromOffset(42, 42),
 				Position = UDim2.fromOffset(0, 3),
 				Children = {
 					UI.corner(Theme.Radius.Medium),
 					UI.new("UIGradient", {
-						Color = ColorSequence.new(C.AccentHover, Color3.fromRGB(150, 92, 255)),
+						Color = ColorSequence.new(C.AccentHover, C.Accent),
 						Rotation = 45,
 					}),
 				},

@@ -20,6 +20,8 @@ local Sell = {}
 
 local CART_WIDTH = 368
 local BOTTOM_HEIGHT = 244
+local DINING = Config.Orders.DiningOptions
+local LINES_TOP = if #DINING > 0 then 134 else 94
 
 local current -- the live screen instance; push listeners forward to it
 
@@ -43,6 +45,7 @@ function Sell.new(ctx)
 
 	local cart: { { productId: string, qty: number } } = {}
 	local discount = 0
+	local dining: string? = DINING[1]
 	local customer: { userId: number, name: string }? = nil
 	local pending: { orderId: string, customer: string, total: number }? = nil
 	local category = "All"
@@ -126,10 +129,40 @@ function Sell.new(ctx)
 	UI.padding(0, 14).Parent = customerButton
 	customerButton.Parent = panel
 
+	-- Eat in / Take away
+	local diningRow = UI.new("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(0, 92),
+		Size = UDim2.new(1, 0, 0, 34),
+		Visible = #DINING > 0,
+		Parent = panel,
+		Children = { UI.list(6, Enum.FillDirection.Horizontal) },
+	})
+	local renderDining -- forward
+	function renderDining()
+		UI.clear(diningRow)
+		for i, option in DINING do
+			UI.button({
+				Text = option,
+				Style = if option == dining then "primary" else "secondary",
+				TextSize = 14,
+				Size = UDim2.new(1 / #DINING, -6, 1, 0),
+				LayoutOrder = i,
+				Radius = Theme.Radius.Pill,
+				Parent = diningRow,
+				OnClick = function()
+					dining = option
+					renderDining()
+				end,
+			})
+		end
+	end
+	renderDining()
+
 	local lines = UI.scroll({
 		Name = "Lines",
-		Position = UDim2.fromOffset(0, 94),
-		Size = UDim2.new(1, 0, 1, -(94 + BOTTOM_HEIGHT)),
+		Position = UDim2.fromOffset(0, LINES_TOP),
+		Size = UDim2.new(1, 0, 1, -(LINES_TOP + BOTTOM_HEIGHT)),
 		Parent = panel,
 		Children = { UI.list(6) },
 	})
@@ -138,8 +171,8 @@ function Sell.new(ctx)
 		TextColor3 = C.Faint,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(0, 94),
-		Size = UDim2.new(1, 0, 1, -(94 + BOTTOM_HEIGHT)),
+		Position = UDim2.fromOffset(0, LINES_TOP),
+		Size = UDim2.new(1, 0, 1, -(LINES_TOP + BOTTOM_HEIGHT)),
 		Parent = panel,
 	})
 
@@ -408,7 +441,7 @@ function Sell.new(ctx)
 				local stroke = UI.stroke()
 				local scale = UI.new("UIScale")
 				local badgeText, badgeFg, badgeBg = stockBadge(product)
-				local inCart = UI.pill("×0", Color3.new(1, 1, 1), C.Accent, {
+				local inCart = UI.pill("×0", C.OnAccent, C.Accent, {
 					Visible = false,
 					AnchorPoint = Vector2.new(1, 1),
 					Position = UDim2.new(1, -10, 1, -10),
@@ -460,7 +493,7 @@ function Sell.new(ctx)
 							Text = money(product.price),
 							FontFace = F.Heavy,
 							TextSize = 19,
-							TextColor3 = if soldOut then C.Faint else C.AccentHover,
+							TextColor3 = if soldOut then C.Faint else C.AccentText,
 							Position = UDim2.fromOffset(12, 80),
 							Size = UDim2.new(1, -70, 0, 22),
 						}),
@@ -802,7 +835,7 @@ function Sell.new(ctx)
 		elseif action == "charge" and customer then
 			UI.setEnabled(charge, false)
 			charge.Text = "Sending…"
-			local ok, result = Api.call("checkout.start", payload(), discount, customer.userId)
+			local ok, result = Api.call("checkout.start", payload(), discount, customer.userId, dining)
 			if ok then
 				pending = { orderId = result.orderId, customer = result.customer, total = result.total }
 				showWaiting(true)
@@ -832,7 +865,12 @@ function Sell.new(ctx)
 		showWaiting(false)
 		if update.status == "paid" then
 			local sale = update.sale
-			Toasts.show(string.format("Paid %s · %s", money(sale.total), sale.receipt), "success")
+			Toasts.show(
+				if sale.orderNumber
+					then string.format("Paid %s · order %d", money(sale.total), sale.orderNumber)
+					else string.format("Paid %s · %s", money(sale.total), sale.receipt),
+				"success"
+			)
 			table.clear(cart)
 			discount = 0
 			customer = nil

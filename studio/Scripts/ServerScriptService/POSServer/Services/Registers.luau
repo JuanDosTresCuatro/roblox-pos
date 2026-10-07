@@ -4,29 +4,25 @@
 -- Optional attributes on the tagged instance:
 --   RegisterId   (string) stable id, generated if missing
 --   RegisterName (string) shown to staff and customers
--- Optional child: a BasePart named "Screen" for the customer display (front face).
+-- Optional child: a BasePart named "Screen" for the customer "Your order" display (front face).
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("POS")
 local Config = require(Shared.Config)
 local Format = require(Shared.Format)
+local Palette = require(Shared.Palette)
 local Signal = require(Shared.Signal)
 local Api = require(script.Parent.Api)
 local Staff = require(script.Parent.Staff)
 local Shifts = require(script.Parent.Shifts)
+local Surface = require(script.Parent.Surface)
 
 local Registers = {}
 Registers.released = Signal.new() -- (register, reason)
 
-export type Display = {
-	status: TextLabel,
-	detail: TextLabel,
-	total: TextLabel,
-	accent: Frame,
-}
+export type PreviewLine = { name: string, qty: number, total: number }
 
 export type Register = {
 	id: string,
@@ -34,12 +30,13 @@ export type Register = {
 	instance: Instance,
 	anchor: BasePart,
 	prompt: ProximityPrompt,
-	display: Display?,
+	screen: BasePart,
 	operator: Player?,
 	shift: Shifts.Shift?,
 	order: any?, -- the pending Checkout order, if any
-	preview: { items: number, total: number }?,
+	preview: { items: number, total: number, discount: number, lines: { PreviewLine } }?,
 	flashUntil: number,
+	flashNumber: number?,
 }
 
 local registers: { [string]: Register } = {}
@@ -47,139 +44,186 @@ local byInstance: { [Instance]: Register } = {}
 local byOperator: { [Player]: Register } = {}
 local count = 0
 
-local COLOURS = {
-	idle = Color3.fromRGB(88, 130, 255),
-	busy = Color3.fromRGB(242, 173, 61),
-	paid = Color3.fromRGB(46, 204, 113),
-	closed = Color3.fromRGB(110, 116, 135),
-}
+local F = Surface.Fonts
+local MAX_LINES = 5
 
 local function money(n: number): string
 	return Format.money(n, Config.Currency.Symbol)
 end
 
-local function label(parent: Instance, props: { [string]: any }): TextLabel
-	local text = Instance.new("TextLabel")
-	text.BackgroundTransparency = 1
-	text.TextColor3 = Color3.fromRGB(236, 239, 245)
-	text.TextScaled = true
-	text.FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Bold)
-	for key, value in props do
-		(text :: any)[key] = value
-	end
-	text.Parent = parent
-	return text
-end
+-- The customer-facing "Your order" screen. Redrawn from scratch on every change.
+local function draw(register: Register, state)
+	local _, root, size = Surface.create(register.screen, "RoPOSDisplay")
+	local unit = size.Y / 100
 
-local function buildDisplay(register: Register): Display?
-	local screen = register.instance:FindFirstChild("Screen", true)
-	local part = if screen and screen:IsA("BasePart") then screen else nil
-	local gui: LayerCollector
-	if part then
-		local surface = Instance.new("SurfaceGui")
-		surface.Face = Enum.NormalId.Front
-		surface.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-		surface.PixelsPerStud = 120
-		surface.LightInfluence = 0
-		surface.Brightness = 1.6
-		surface.Adornee = part
-		gui = surface
-	else
-		local board = Instance.new("BillboardGui")
-		board.Size = UDim2.fromScale(5, 2.6)
-		board.StudsOffsetWorldSpace = Vector3.new(0, 3.5, 0)
-		board.MaxDistance = 60
-		board.Adornee = register.anchor
-		gui = board
-	end
-	gui.Name = "RoPOSDisplay"
-
-	local root = Instance.new("Frame")
-	root.Size = UDim2.fromScale(1, 1)
-	root.BackgroundColor3 = Color3.fromRGB(13, 15, 20)
-	root.Parent = gui
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0.06, 0)
-	corner.Parent = root
-
-	local accent = Instance.new("Frame")
-	accent.Size = UDim2.fromScale(1, 0.05)
-	accent.BorderSizePixel = 0
-	accent.BackgroundColor3 = COLOURS.closed
-	accent.Parent = root
-
-	label(root, {
-		Name = "Store",
-		Size = UDim2.fromScale(0.9, 0.13),
-		Position = UDim2.fromScale(0.05, 0.1),
-		Text = string.upper(Config.Store.Name),
-		TextColor3 = Color3.fromRGB(146, 153, 170),
-		TextXAlignment = Enum.TextXAlignment.Left,
+	-- Header: store name and a coloured strip that shows the state at a glance.
+	Surface.box(root, { Size = UDim2.new(1, 0, 0, 3 * unit), BackgroundColor3 = state.colour })
+	Surface.text(root, {
+		Text = Config.Store.Name,
+		FontFace = F.Heavy,
+		TextSize = 9 * unit,
+		Position = UDim2.fromOffset(6 * unit, 7 * unit),
+		Size = UDim2.new(0.6, 0, 0, 10 * unit),
 	})
-	local status = label(root, {
-		Name = "Status",
-		Size = UDim2.fromScale(0.9, 0.24),
-		Position = UDim2.fromScale(0.05, 0.27),
-		TextXAlignment = Enum.TextXAlignment.Left,
-	})
-	local detail = label(root, {
-		Name = "Detail",
-		Size = UDim2.fromScale(0.9, 0.13),
-		Position = UDim2.fromScale(0.05, 0.53),
-		TextColor3 = Color3.fromRGB(146, 153, 170),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		FontFace = Font.new("rbxasset://fonts/families/BuilderSans.json", Enum.FontWeight.Medium),
-	})
-	local total = label(root, {
-		Name = "Total",
-		Size = UDim2.fromScale(0.9, 0.24),
-		Position = UDim2.fromScale(0.05, 0.7),
+	Surface.text(root, {
+		Text = register.name,
+		FontFace = F.Medium,
+		TextSize = 7 * unit,
+		TextColor3 = Palette.Muted,
 		TextXAlignment = Enum.TextXAlignment.Right,
-		FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold),
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -6 * unit, 0, 8 * unit),
+		Size = UDim2.new(0.4, 0, 0, 9 * unit),
 	})
 
-	gui.Parent = part or register.anchor
-	return { status = status, detail = detail, total = total, accent = accent }
+	local status = Surface.text(root, {
+		Name = "Status",
+		Text = state.status,
+		FontFace = F.Heavy,
+		TextSize = (if state.lines then 11 else 19) * unit,
+		Position = UDim2.fromOffset(6 * unit, 22 * unit),
+		Size = UDim2.new(1, -12 * unit, 0, (if state.lines then 12 else 22) * unit),
+	})
+
+	if state.lines then
+		local list = Surface.new("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(6 * unit, 36 * unit),
+			Size = UDim2.new(1, -12 * unit, 0, 40 * unit),
+			Parent = root,
+		})
+		Surface.new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = list })
+		local shown = math.min(#state.lines, MAX_LINES)
+		for i = 1, shown do
+			local line = state.lines[i]
+			local text = if i == MAX_LINES and #state.lines > MAX_LINES
+				then string.format("+ %d more", #state.lines - MAX_LINES + 1)
+				else string.format("%d × %s", line.qty, line.name)
+			local row = Surface.new("Frame", {
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 0, 0, 8 * unit),
+				LayoutOrder = i,
+				Parent = list,
+			})
+			Surface.text(
+				row,
+				{ Text = text, FontFace = F.Medium, TextSize = 6.4 * unit, Size = UDim2.fromScale(0.75, 1) }
+			)
+			if not (i == MAX_LINES and #state.lines > MAX_LINES) then
+				Surface.text(row, {
+					Text = money(line.total),
+					FontFace = F.Mono,
+					TextSize = 6 * unit,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					Position = UDim2.fromScale(0.75, 0),
+					Size = UDim2.fromScale(0.25, 1),
+				})
+			end
+		end
+	else
+		Surface.text(root, {
+			Text = state.detail,
+			FontFace = F.Medium,
+			TextSize = 8 * unit,
+			TextColor3 = Palette.Muted,
+			Position = UDim2.fromOffset(6 * unit, 46 * unit),
+			Size = UDim2.new(1, -12 * unit, 0, 10 * unit),
+		})
+	end
+
+	-- Footer: the total on a yellow bar, or the order number after payment.
+	if state.total or state.number then
+		local bar = Surface.box(root, {
+			BackgroundColor3 = state.barColour or Palette.Accent,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.new(1, 0, 0, 20 * unit),
+		})
+		local ink = state.barInk or Palette.OnAccent
+		Surface.text(bar, {
+			Text = state.barLabel or "Total",
+			FontFace = F.Bold,
+			TextSize = 8 * unit,
+			TextColor3 = ink,
+			Position = UDim2.fromOffset(6 * unit, 0),
+			Size = UDim2.fromScale(0.6, 1),
+		})
+		Surface.text(bar, {
+			Text = if state.number then "Order " .. state.number else state.total,
+			FontFace = F.Heavy,
+			TextSize = 12 * unit,
+			TextColor3 = ink,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -6 * unit, 0, 0),
+			Size = UDim2.fromScale(0.5, 1),
+		})
+	end
+	return status
 end
 
 function Registers.updateDisplay(register: Register)
-	local display = register.display
 	local operator = register.operator
 	register.prompt.ObjectText = if operator then register.name .. " · " .. operator.DisplayName else register.name
-	if not display then
-		return
-	end
 
-	local status, detail, total, colour
+	local state
 	if os.clock() < register.flashUntil then
-		status, detail, total, colour = "Thank you!", "Payment approved", "✓", COLOURS.paid
+		state = {
+			status = "Thank you!",
+			detail = if register.flashNumber then "Watch the board for your number" else "Payment approved",
+			colour = Palette.Success,
+			number = register.flashNumber,
+			barColour = Palette.Success,
+			barInk = Palette.OnSuccess,
+			barLabel = "Your order number",
+		}
 	elseif register.order then
-		status = "Please approve"
-		detail = "Waiting for " .. register.order.customer.DisplayName
-		total, colour = money(register.order.totals.total), COLOURS.busy
+		local lines = {}
+		for _, line in register.order.totals.lines do
+			table.insert(
+				lines,
+				{ name = line.name or line.productId, qty = line.qty, total = line.unitPrice * line.qty }
+			)
+		end
+		state = {
+			status = "Please approve",
+			lines = lines,
+			colour = Palette.Warning,
+			total = money(register.order.totals.total),
+			barLabel = "Approve on your screen",
+		}
 	elseif operator and register.preview and register.preview.items > 0 then
-		status = string.format("%d item%s", register.preview.items, if register.preview.items == 1 then "" else "s")
-		detail = "Served by " .. operator.DisplayName
-		total, colour = money(register.preview.total), COLOURS.idle
+		state = {
+			status = "Your order",
+			lines = register.preview.lines,
+			colour = Palette.Accent,
+			total = money(register.preview.total),
+			barLabel = if register.preview.discount > 0
+				then "Total (" .. money(register.preview.discount) .. " off)"
+				else "Total",
+		}
 	elseif operator and register.shift then
-		status, detail, total, colour = "Welcome!", operator.DisplayName .. " can take your order", "", COLOURS.idle
+		state =
+			{ status = "Welcome!", detail = operator.DisplayName .. " can take your order", colour = Palette.Accent }
 	elseif register.shift then
-		status, detail, total, colour = "Back soon", "Waiting for a cashier", "", COLOURS.closed
+		state = { status = "Back soon", detail = "Waiting for a cashier", colour = Palette.Faint }
 	else
-		status, detail, total, colour = "Closed", register.name, "", COLOURS.closed
+		state = { status = "Closed", detail = register.name, colour = Palette.Faint }
 	end
-
-	display.status.Text = status
-	display.detail.Text = detail
-	display.total.Text = total
-	TweenService:Create(display.accent, TweenInfo.new(0.35), { BackgroundColor3 = colour }):Play()
+	draw(register, state)
 end
 
-function Registers.flashPaid(register: Register)
-	register.flashUntil = os.clock() + 4
+function Registers.flashPaid(register: Register, orderNumber: number?)
+	register.flashUntil = os.clock() + 5
+	register.flashNumber = orderNumber
 	register.preview = nil
 	Registers.updateDisplay(register)
-	task.delay(4.1, Registers.updateDisplay, register)
+	local flashedAt = register.flashUntil
+	task.delay(5.1, function()
+		if register.flashUntil == flashedAt then
+			Registers.updateDisplay(register)
+		end
+	end)
 end
 
 function Registers.summary(register: Register)
@@ -255,6 +299,23 @@ local function findAnchor(instance: Instance): BasePart?
 	return instance:FindFirstChildWhichIsA("BasePart", true)
 end
 
+-- The customer screen: a Part named "Screen", or a small one made above the till.
+local function findScreen(instance: Instance, anchor: BasePart): BasePart
+	local screen = instance:FindFirstChild("Screen", true)
+	if screen and screen:IsA("BasePart") then
+		return screen
+	end
+	local made = Instance.new("Part")
+	made.Name = "Screen"
+	made.Anchored = true
+	made.CanCollide = false
+	made.Size = Vector3.new(3.2, 2, 0.1)
+	made.Color = Palette.Bezel
+	made.CFrame = anchor.CFrame * CFrame.new(0, anchor.Size.Y / 2 + 1.6, 0)
+	made.Parent = instance
+	return made
+end
+
 local function add(instance: Instance)
 	if byInstance[instance] then
 		return
@@ -291,14 +352,14 @@ local function add(instance: Instance)
 		instance = instance,
 		anchor = anchor,
 		prompt = prompt,
-		display = nil,
+		screen = findScreen(instance, anchor),
 		operator = nil,
 		shift = nil,
 		order = nil,
 		preview = nil,
 		flashUntil = 0,
+		flashNumber = nil,
 	}
-	register.display = buildDisplay(register)
 	registers[id] = register
 	byInstance[instance] = register
 

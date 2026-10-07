@@ -24,6 +24,7 @@ local Sales = require(script.Parent.Sales)
 local Shifts = require(script.Parent.Shifts)
 local Staff = require(script.Parent.Staff)
 local Wallet = require(script.Parent.Wallet)
+local Orders = require(script.Parent.Orders)
 
 local Checkout = {}
 
@@ -35,6 +36,7 @@ export type Order = {
 	cart: { Validate.CartLine },
 	discountPct: number,
 	totals: Pricing.Totals,
+	dining: string?,
 	status: "pending" | "paid" | "declined" | "expired" | "cancelled",
 	expiresAt: number,
 }
@@ -117,7 +119,22 @@ local function finish(order: Order, status, reason: string)
 	Registers.updateDisplay(order.register)
 end
 
-function Checkout.start(player: Player, register: Registers.Register, rawCart: any, rawDiscount: any, rawCustomer: any)
+-- Returns the dining option if it is one of Config.Orders.DiningOptions, or nil.
+function Checkout.dining(raw: any): string?
+	if typeof(raw) == "string" and table.find(Config.Orders.DiningOptions, raw) then
+		return raw
+	end
+	return nil
+end
+
+function Checkout.start(
+	player: Player,
+	register: Registers.Register,
+	rawCart: any,
+	rawDiscount: any,
+	rawCustomer: any,
+	rawDining: any
+)
 	if not register.shift then
 		Api.fail("Open a shift before taking payments")
 	end
@@ -164,6 +181,7 @@ function Checkout.start(player: Player, register: Registers.Register, rawCart: a
 		customer = customer,
 		cart = cart,
 		discountPct = discountPct,
+		dining = Checkout.dining(rawDining),
 		totals = totals,
 		status = "pending",
 		expiresAt = os.clock() + timeout,
@@ -227,25 +245,71 @@ function Checkout.respond(customer: Player, orderId: any, accept: any)
 		Api.fail("Prices or stock changed. The cashier needs to ring this up again.")
 	end
 
-	-- From here to the end of the stock loop nothing yields, so the debit and stock are atomic.
-	if not Wallet.tryDebit(customer, order.totals.total) then
-		Api.fail("You don't have enough " .. Config.Currency.StatName)
-	end
-	order.status = "paid"
-	detach(order)
-	for _, line in order.totals.lines do
-		Catalogue.adjustStock(line.productId, -line.qty)
-	end
-
 	local register = order.register
 	local operator = order.operator
-	local commission = math.floor(order.totals.total * Config.Payouts.CashierCommissionPct / 100)
+	local sale = Checkout.complete({
+		customer = customer,
+		totals = order.totals,
+		discountPct = order.discountPct,
+		registerId = register.id,
+		registerName = register.name,
+		shift = register.shift,
+		cashier = { userId = operator.UserId, name = operator.DisplayName },
+		actor = operator,
+		dining = order.dining,
+		source = "Counter",
+		onPaid = function()
+			order.status = "paid"
+			detach(order)
+			Registers.flashPaid(register)
+		end,
+	})
+	if not sale then
+		Api.fail("You don't have enough " .. Config.Currency.StatName)
+	end
+	Registers.flashPaid(register, sale.orderNumber)
+
+	local commission = math.floor(sale.total * Config.Payouts.CashierCommissionPct / 100)
 	if commission > 0 and operator ~= customer and operator.Parent then
 		Wallet.credit(operator, commission)
 	end
 
+	Api.push(operator, "OrderUpdate", { orderId = order.id, status = "paid", sale = sale })
+	Registers.refreshOperator(register)
+	return { status = "paid", receipt = sale.receipt, orderNumber = sale.orderNumber }
+end
+
+export type CompleteArgs = {
+	customer: Player,
+	totals: Pricing.Totals,
+	discountPct: number,
+	registerId: string,
+	registerName: string,
+	shift: Shifts.Shift?,
+	cashier: { userId: number, name: string },
+	actor: Player | string, -- who the audit log names
+	dining: string?,
+	source: string, -- "Counter" or "Kiosk"
+	onPaid: (() -> ())?, -- runs straight after the debit, before anything yields
+}
+
+-- Takes the money and the stock, then records the sale, gives the items and creates the order
+-- ticket. Nothing yields between the balance check and the stock change, so two payments can
+-- never spend the same money or the last item. Returns nil if the customer cannot pay.
+function Checkout.complete(args: CompleteArgs): Sales.Sale?
+	local customer, totals = args.customer, args.totals
+	if not Wallet.tryDebit(customer, totals.total) then
+		return nil
+	end
+	for _, line in totals.lines do
+		Catalogue.adjustStock(line.productId, -line.qty)
+	end
+	if args.onPaid then
+		args.onPaid()
+	end
+
 	local saleLines = {}
-	for _, line in order.totals.lines do
+	for _, line in totals.lines do
 		table.insert(saleLines, {
 			productId = line.productId,
 			name = line.name or line.productId,
@@ -259,39 +323,43 @@ function Checkout.respond(customer: Player, orderId: any, accept: any)
 	local sale: Sales.Sale = {
 		receipt = "",
 		t = os.time(),
-		registerId = register.id,
-		registerName = register.name,
-		shiftId = if register.shift then register.shift.id else nil,
-		cashier = { userId = operator.UserId, name = operator.DisplayName },
+		registerId = args.registerId,
+		registerName = args.registerName,
+		shiftId = if args.shift then args.shift.id else nil,
+		cashier = args.cashier,
 		customer = { userId = customer.UserId, name = customer.DisplayName },
 		lines = saleLines,
-		discountPct = order.discountPct,
-		subtotal = order.totals.subtotal,
-		discount = order.totals.discount,
-		tax = order.totals.tax,
-		total = order.totals.total,
+		discountPct = args.discountPct,
+		subtotal = totals.subtotal,
+		discount = totals.discount,
+		tax = totals.tax,
+		total = totals.total,
 		refunded = nil,
+		source = args.source,
+		dining = args.dining,
+		orderNumber = Orders.nextNumber(),
 	}
-	if register.shift then
-		Shifts.recordSale(register.shift, sale)
+	if args.shift then
+		Shifts.recordSale(args.shift, sale)
 	end
-	giveItems(customer, order.totals.lines)
-	Registers.flashPaid(register)
+	giveItems(customer, totals.lines)
 
 	Sales.record(sale) -- yields for the receipt number
-	if order.discountPct > 0 then
+	Orders.add(sale)
+	if args.discountPct > 0 then
 		Audit.log(
-			operator,
+			args.actor,
 			"discount",
-			string.format("%s: %d%% (%s off)", sale.receipt, order.discountPct, money(sale.discount))
+			string.format("%s: %d%% (%s off)", sale.receipt, args.discountPct, money(sale.discount))
 		)
 	end
-	Audit.log(operator, "sale", string.format("%s: %s to %s", sale.receipt, money(sale.total), customer.Name))
-
-	Api.push(operator, "OrderUpdate", { orderId = order.id, status = "paid", sale = sale })
+	Audit.log(
+		args.actor,
+		"sale",
+		string.format("%s: %s to %s (%s)", sale.receipt, money(sale.total), customer.Name, args.source)
+	)
 	Api.push(customer, "Receipt", sale)
-	Registers.refreshOperator(register)
-	return { status = "paid", receipt = sale.receipt }
+	return sale
 end
 
 function Checkout.init()

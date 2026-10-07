@@ -34,6 +34,9 @@ export type Sale = {
 	tax: number,
 	total: number,
 	refunded: { t: number, by: string, restocked: boolean }?,
+	source: string?, -- "Counter" or "Kiosk"
+	dining: string?, -- "Eat in", "Take away" or nil
+	orderNumber: number?,
 }
 
 export type Summary = {

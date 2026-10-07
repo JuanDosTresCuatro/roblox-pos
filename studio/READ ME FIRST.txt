@@ -1,10 +1,11 @@
 RoPOS: a point of sale system for Roblox
 =========================================
 
-Staff ring up orders at a till in your game. The customer approves the
-payment on their own screen, the money moves, stock goes down and the items
-appear in their backpack. Managers get shift reports, refunds, price and
-stock control, 7-day reports and an audit log. Prices are in pounds (£).
+A restaurant and shop system for your Roblox game: a staff till, self-order
+kiosks, a kitchen display, an order status board and menu boards. Customers
+pay with in-game money, get an order number, and are told when their order
+is ready. Managers get shift reports, refunds, price and stock control,
+7-day reports and an audit log. Prices are in pounds (£).
 
 All you need is Roblox Studio (free from create.roblox.com).
 
@@ -23,7 +24,15 @@ OPTION 1: TRY THE DEMO (2 minutes)
 ----------------------------------
 
 1. Double-click RoPOS.rbxlx (or in Studio: File > Open from File).
-2. Press Play (F5). A Blox Mart shop counter appears in front of you.
+2. Press Play (F5). The Blox Mart restaurant appears in front of you.
+
+   Order at a kiosk: walk up to one of the kiosks on the right, click
+   "Touch to start", choose Eat in or Take away, add items, press
+   "View order" then "Pay". Your order number appears on the order board
+   and the kitchen display. Click "Ready" on the kitchen display, then
+   "Collected".
+
+   Or sell at the till:
 3. Walk round the back of the counter and hold E on the till.
 4. Go to the Shift tab and press "Open shift".
 5. On the Sell tab, tap some items, press "Choose customer", pick
@@ -62,9 +71,23 @@ OPTION 2: ADD IT TO YOUR OWN GAME (5 minutes)
    Every setting is explained in the file.
 
 
-USE YOUR OWN TILL
------------------
+USE YOUR OWN EQUIPMENT
+----------------------
 
+Each piece of equipment is a Model (or Part) with a tag. Select it, open
+Properties > Tags and add the tag:
+
+  Till                POSRegister
+  Self-order kiosk    POSKiosk           (needs a Part named "Screen")
+  Kitchen display     POSKitchenDisplay  (a Part named "Screen", facing staff)
+  Order status board  POSOrderBoard      (a Part named "Screen")
+  Menu board          POSMenuBoard       (a Part named "Screen"; optional
+                                          attribute Category, e.g. Gear)
+
+Screens are drawn on the Part's front face. If one shows on the wrong
+side, rotate the Part 180 degrees.
+
+For a till:
 1. Build a till model (or use a single Part).
 2. Select it, open Properties > Tags and add the tag:  POSRegister
 3. Optional attributes on the model:
@@ -123,5 +146,8 @@ IF SOMETHING DOES NOT WORK
   (about 4.5 m) of the till.
 - The POS window closes by itself: the cashier walked more than 20 studs
   (about 5.6 m) from the till.
+- A kiosk says "Step closer": stand within about 3 m of it.
+- A kiosk says "Someone is ordering": another player is using it. It frees
+  itself after 60 seconds without a tap, or when they walk away.
 - Errors in the Output window (View > Output) start with [RoPOS] and say
   what to fix.
