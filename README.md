@@ -1,283 +1,192 @@
 # RoPOS
 
-A point of sale system for Roblox experiences: shops, cafés, restaurants and any roleplay game where staff sell to players. The demo shop, Blox Mart, sells classic Roblox items (Bloxy Cola, Gravity Coil, Linked Sword, Golden Crown and more) priced in pounds.
+A point of sale system for Roblox games. Staff ring up orders at a till, the customer approves the payment on their own screen, the money moves, stock goes down and the items appear in the customer's backpack. Managers get shift reports, refunds, price and stock control, 7-day reports and an audit log.
 
-Staff walk up to a register and ring up an order. The customer approves the payment on their own screen, the money moves, stock goes down, the items appear in their backpack and both players get a receipt. Managers get shift reports, refunds, price and stock control, 7-day reports and an audit log. Everything is saved and shared across every server of the game.
+The demo shop, **Blox Mart**, sells classic Roblox items (Bloxy Cola, Gravity Coil, Linked Sword, Golden Crown and more), priced in pounds (£).
 
-RoPOS started as the Roblox version of a web POS (pos-system) and keeps its pricing rules and rounding.
+**You need:** [Roblox Studio](https://create.roblox.com/) (free). You don't need to write any code.
 
 ## Download
 
-**[Download RoPOS-Studio.zip](https://github.com/JuanDosTresCuatro/roblox-pos/releases/latest/download/RoPOS-Studio.zip)** (latest release). Unzip it and open `READ ME FIRST.txt`. It contains the demo place, the 3 model files to add RoPOS to your own game, and the scripts.
+**[Download RoPOS-Studio.zip](https://github.com/JuanDosTresCuatro/roblox-pos/releases/latest/download/RoPOS-Studio.zip)**
 
-Other downloads on the [Releases page](https://github.com/JuanDosTresCuatro/roblox-pos/releases/latest):
+Unzip it anywhere. Inside you'll find:
 
-| File | For |
+| File | What it is |
 | --- | --- |
-| `RoPOS-Studio.zip` | Everything for Roblox Studio, with setup steps |
-| `RoPOS.rbxlx` | Just the demo place: open it in Studio and press Play |
-| `RoPOS-Simulator.html` | Try it in a browser, no Roblox needed |
+| `RoPOS.rbxlx` | A complete demo game. Open it to try RoPOS |
+| `Models/` | 3 files that add RoPOS to your own game |
+| `READ ME FIRST.txt` | These instructions, for offline use |
+| `Scripts/` | The code as plain files, if you want to read it. You don't need these |
 
-## Start here
+No Roblox Studio to hand? Download [`RoPOS-Simulator.html`](https://github.com/JuanDosTresCuatro/roblox-pos/releases/latest/download/RoPOS-Simulator.html) and double-click it to try RoPOS in your browser.
 
-Pick the one that fits you. None of them need you to write code.
+## Try the demo
 
-### 1. Try it in a browser (no Roblox needed, 1 minute)
+1. Open **`RoPOS.rbxlx`** (double-click it, or in Studio choose **File > Open from File**).
+2. Press **Play** (F5). A Blox Mart counter appears in front of you.
+3. Walk round to the back of the counter and hold **E** on the till. The POS window opens.
+4. Go to the **Shift** tab and press **Open shift**.
+5. Go to the **Sell** tab and tap some items to add them to the order.
+6. Press **Choose customer** and pick yourself.
+7. Press **Charge**.
+8. Your payment screen pops up. Press **Pay**.
 
-Double-click [`simulator/index.html`](simulator/index.html). It opens in any browser and works offline.
+The items appear in your backpack and your Cash (top right of the screen) goes down. A receipt pops up.
 
-You play the staff on the left and the customers on the right:
+In Studio, everyone is a manager and you can charge yourself, so you can try everything on your own. To try it with a separate cashier and customer, go to **Test > Clients and Servers**, choose 2 players and press **Start**.
 
-1. The page opens with Ann (a manager) at the till, a shift open, and 2 Bloxy Colas and a Pizza Slice in the order for Bob.
-2. Press **Charge £10**. Bob's screen on the right shows the bill.
-3. Press **Pay £10** on Bob's screen. Bob's Cash drops, the items land in his backpack and both sides get a receipt.
-4. Work through **Things to try** under the simulator: declines, a customer who can't afford it, a price change mid-payment, refunds, the cashier's limits and the Z report.
+## Add RoPOS to your own game
 
-The **Server log** at the bottom shows every request and its result, the same messages the real server sends.
+1. Open your game in Roblox Studio.
+2. In the **Explorer** panel, right-click **ReplicatedStorage**, choose **Insert from File...** and pick `Models/POS.rbxmx`.
+3. Right-click **ServerScriptService**, choose **Insert from File...** and pick `Models/POSServer.rbxmx`.
+4. Open **StarterPlayer**, right-click **StarterPlayerScripts**, choose **Insert from File...** and pick `Models/POSClient.rbxmx`.
+5. Press **Play**. If your game has no till yet, RoPOS builds a demo counter so you can check it works.
 
-The simulator is a faithful browser copy of the RoPOS rules for trying things out. The real Roblox code is tested separately (see [Test without Roblox](#test-without-roblox)).
+Keep the names `POS`, `POSServer` and `POSClient` exactly as they are. The scripts find each other by name.
 
-### 2. Play it in Roblox Studio (5 minutes)
+## Set up your shop
 
-1. Install [Roblox Studio](https://create.roblox.com/) if you don't have it.
-2. Open [`RoPOS.rbxlx`](RoPOS.rbxlx) from this folder (double-click it, or File > Open in Studio).
-3. Press **Play** (F5). A Blox Mart counter appears in front of you.
-4. Walk round the back of the counter and hold **E** on the till. The POS window opens.
-5. Go to the **Shift** tab and press **Open shift**.
-6. On **Sell**, tap some products, press **Choose customer**, pick yourself and press **Charge**.
-7. Your own payment screen pops up. Press **Pay**. The items appear in your backpack and Cash goes down (top right).
+All the settings are in one script: **ReplicatedStorage > POS > Config**. Double-click it to open it. Each setting has a comment that explains it.
 
-During Studio play tests everyone is a manager and you can charge yourself, so you can try everything alone. To test with a separate cashier and customer, use **Test > Clients and Servers** with 2 players.
+### Shop name and receipts
 
-Nothing is saved between play tests until you publish the place and turn on **Game Settings > Security > Enable Studio Access to API Services**. Until then the POS header shows "Studio: data not saved".
-
-### 3. Put it in your own game
-
-1. Open your place in Studio.
-2. Open `RoPOS.rbxlx` as well, and copy these 3 folders across into the same places in your game:
-   - `ReplicatedStorage > POS`
-   - `ServerScriptService > POSServer`
-   - `StarterPlayer > StarterPlayerScripts > POSClient`
-3. Edit `ReplicatedStorage > POS > Config` to set your shop name, products, prices, staff and currency. Every setting is explained in the file.
-4. Press Play. If your map has no register yet, RoPOS builds a demo counter so you can test straight away. Then tag your own till model `POSRegister` and turn off `Config.Demo.SpawnRegister` (see [Your own registers](#your-own-registers)).
-5. Before you publish, set who your staff are: `Config.Staff.GroupId` and the ranks, or user IDs in `Config.Staff.Users`. Set `Config.Staff.StudioRole = nil` to test the real rules in Studio.
-
-Developers who prefer files and Git can sync with Rojo instead (see [Development](#development)).
-
-### Send it to someone
-
-The [`studio/`](studio/) folder has everything Roblox Studio needs and nothing else: the demo place, one model file per Studio location (for **Insert from File**), the scripts as plain files, and a `READ ME FIRST.txt` with setup steps. To make a zip to send, run this in the `roblox` folder:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging/package-studio.ps1
+```lua
+Config.Store = {
+	Name = "Blox Mart",
+	ReceiptPrefix = "BM",          -- receipts are numbered BM-000001, BM-000002, ...
+	Footer = "Thanks for shopping at Blox Mart!",
+}
 ```
-
-It rebuilds `studio/` from the current code and writes `RoPOS-Studio.zip`. Run it again after changing the code.
-
-### Publish a release
-
-Push a version tag and GitHub builds the downloads and publishes the release by itself (see `.github/workflows/release.yml`). It runs the tests first, so a broken version is never released.
-
-```sh
-git tag v1.1.0
-git push origin v1.1.0
-```
-
-## How a sale works in game
-
-| Who | Does what |
-| --- | --- |
-| Cashier | Holds **E** on the till, opens a shift, taps products, chooses the customer standing at the counter, presses **Charge** |
-| Till screen | Shows the customer the item count and total, then "Please approve" |
-| Customer | Gets a payment screen with the bill, their balance before and after, and a 30-second countdown. Presses **Pay** or **Decline** |
-| Server | Checks the price again, takes the money and the stock, puts the items in the customer's backpack, records the sale |
-| Both | Get a paper-style receipt. The till screen says "Thank you!" |
-| Manager | Refunds from the **Sales** tab, edits prices and stock on **Products**, reads **Reports** and the **Audit log** |
-
-## Features
-
-| Area | What it does |
-| --- | --- |
-| Registers | Tag any Model or Part `POSRegister` to make a till. Proximity prompt for staff, a customer-facing screen in the world that shows the live order total, "Please approve" and "Thank you!", and automatic sign-out when the cashier walks away |
-| Sell | Product grid with search, category chips, stock badges and in-cart counters. Quantity steppers, discount presets limited by role, live totals, a nearby-customer picker and a waiting screen with countdown and cancel |
-| Payment | The customer sees an itemised bill, their balance before and after, and a countdown. They choose Pay or Decline. Nothing is charged without their approval |
-| Receipts | Paper-style receipt for cashier and customer. Look up any receipt by number |
-| Refunds | Managers refund a full sale, with or without restocking. The money returns to the customer even if they are offline or on another server |
-| Shifts | Open a shift to take payments. Live X report at any time, Z report on close: sales, items, gross, discounts, tax, refunds, net, average sale, top items, sales by cashier |
-| Products | Managers change prices, adjust stock and take items off sale in the game. Changes reach every server |
-| Reports | 7-day net takings bar chart, totals, best sellers and top cashiers across all servers |
-| Audit log | Sales, discounts, refunds, price and stock changes, shift open and close, with who and when |
-| Roles | Customer, Cashier and Manager, from a Roblox group rank or a list of user IDs. Cashiers have a discount limit |
-| Currency | Built-in saved currency, or plug in your game's existing leaderstats value |
-| Tax | Optional, per product, tax-inclusive or tax-exclusive |
-
-## How it works
-
-```
- Cashier client                      Server                              Customer client
- ──────────────                      ──────                              ───────────────
- Sell screen ── checkout.start ────▶ validate cart, role, distance
- (live totals from                   price from live catalogue
-  shared Pricing)                    create pending order ── PaymentRequest ──▶ bill + countdown
-                                                                               Pay / Decline
-                                     ◀───────────────────── checkout.respond ──
-                                     re-price (must match)
-                                     debit wallet ┐ one step,
-                                     take stock   ┘ no yields
-                                     record sale, give Tools,
- receipt ◀──────── OrderUpdate ───── update shift and reports ── Receipt ─────▶ receipt
-                                     register screen: "Thank you!"
-```
-
-- **Server-authoritative.** The client sends only product IDs and quantities. The server prices every order from its own catalogue and re-prices on approval. If anything changed, the payment is cancelled instead of charging a different amount.
-- **One API, one router.** A single `RemoteFunction` carries every request as an action name (`"sales.refund"`). The router rate-limits each player, checks the role the action needs, runs it in a `pcall` and returns `{ ok, data }` or `{ ok = false, error }`. Internal errors are logged and never sent to the client.
-- **The server never calls `InvokeClient`.** Server-to-client traffic goes through one `RemoteEvent`, so a client cannot hang a server thread.
-- **Shared pricing.** `Pricing.luau` runs on both sides, so the cart preview always matches the charge. It is a port of the web POS pricing function, and the test suite runs the same cases as the web POS tests.
-
-### Data and multiple servers
-
-Each server keeps a queue of *changes* and applies them inside `UpdateAsync` transforms, so many servers can write the same key without overwriting each other. Writes are batched every 20 seconds and on shutdown.
-
-| DataStore | Key | Contents | How it is written |
-| --- | --- | --- | --- |
-| `RoPOS_Wallets_v1` | `u<UserId>` | balance | Change since last save, so a refund from another server is merged |
-| `RoPOS_Catalogue_v1` | `products` | price, on sale, stock per product | Queued operations (`stock -2`), versioned, other servers told by MessagingService |
-| `RoPOS_Sales_v1` | `counter` | last receipt number | Atomic increment |
-| | `s/<receipt>` | full sale | Once, then the refund flag. The transform refuses a second refund |
-| | `recent` | latest 200 sale summaries | Merged |
-| `RoPOS_Reports_v1` | `d/<YYYY-MM-DD>` | daily totals (UTC) | Per-day totals merged |
-| `RoPOS_Shifts_v1` | `z/<shiftId>` | Z report | Once |
-| `RoPOS_Audit_v1` | `log` | latest 500 actions | Merged |
-
-Change `Config.Data.Scope` to start again with empty data.
-
-### Security model
-
-- Every remote argument is type-checked and range-checked (`Validate.luau`). Carts are capped, merged and rejected if malformed.
-- Roles are resolved on the server only. The client hides staff prompts for customers, but the server checks the role on every action.
-- Cashiers are limited to `Config.Discounts.CashierMaxPct`. Refunds, prices, stock, reports and the audit log need a manager.
-- The customer must be within `CustomerRange` of the register, must approve the payment themselves, and can have only one payment waiting.
-- The wallet debit and the stock decrement happen in one step with no yields, so two payments cannot spend the same money or the last item.
-
-## Project layout
-
-```
-roblox/
-├── default.project.json      Rojo project: where each folder goes in the place
-├── rokit.toml                Pinned tool versions (rojo, selene, stylua, luau-lsp)
-├── src/
-│   ├── shared/               ReplicatedStorage.POS
-│   │   ├── Config.luau       All settings and the product list
-│   │   ├── Pricing.luau      Line pricing (client preview and server totals)
-│   │   ├── Validate.luau     Remote input checks
-│   │   ├── Aggregate.luau    Report totals that merge across servers
-│   │   ├── Format.luau       Money, dates, receipt rows
-│   │   ├── Roles.luau, Signal.luau, Net.luau
-│   ├── server/               ServerScriptService.POSServer
-│   │   ├── init.server.luau  Start-up order
-│   │   ├── Handlers.luau     Every client action and the role it needs
-│   │   └── Services/         Store, Api, Staff, Wallet, Catalogue, Checkout,
-│   │                         Registers, Shifts, Sales, Reports, Audit, Demo
-│   └── client/               StarterPlayerScripts.POSClient
-│       ├── App.luau          Window, header, tabs, screen scaling
-│       ├── PaymentPrompt.luau, Receipt.luau, Api.luau, State.luau
-│       ├── UI/               Theme tokens, UI kit, toasts
-│       └── Screens/          Sell, Sales, Shift, Products, Reports, Audit
-├── tests/
-│   ├── Specs.luau            Unit specs for the pure modules (Luau CLI and Studio)
-│   ├── simulate.luau         End-to-end run of the server code on 2 fake servers (Lune)
-│   └── sim/                  The fake Roblox engine and loader used by simulate.luau
-├── simulator/index.html      Browser simulator, no Roblox needed
-├── studio/                   Studio-only package: place, models, scripts, READ ME FIRST.txt
-├── packaging/                Builds studio/ and RoPOS-Studio.zip
-└── RoPOS.rbxlx               Ready-to-open place file (built with `rojo build`)
-```
-
-## Configuration
-
-Everything is in `src/shared/Config.luau`.
-
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `Store.Name`, `ReceiptPrefix`, `Footer` | Blox Mart, `BM` | Shown on screens and receipts |
-| `Currency.Provider` | `"Builtin"` | `"Leaderstats"` uses a value your game already creates and saves |
-| `Currency.StatName`, `Symbol`, `StartingBalance` | `Cash`, `£`, 100 | Prices and balances are whole pounds, like every Roblox currency |
-| `Tax.Enabled`, `Name`, `Inclusive` | off, `VAT`, inclusive | Rate is per product (`TaxRate`, 20 = UK standard rate) |
-| `Staff.GroupId`, `ManagerRank`, `CashierRank` | 0, 250, 10 | Group ranks for roles. `Users` overrides by UserId |
-| `Staff.StudioRole` | `"Manager"` | Role for everyone in play tests. `nil` uses the normal rules |
-| `Discounts.Presets`, `CashierMaxPct` | 0 to 50, 10 | |
-| `Checkout.CustomerRange` | 16 studs (about 4.5 m) | How close the customer must stand |
-| `Checkout.OperatorRange` | 20 studs (about 5.6 m) | Cashier is signed out beyond this |
-| `Checkout.PaymentTimeout` | 30 s | Time the customer has to approve |
-| `Checkout.AllowSelfCheckout` | `"Studio"` | Let staff charge themselves |
-| `Checkout.GiveItems` | on | Clone `ServerStorage.POSItems[Tool]` into the customer's Backpack |
-| `Payouts.CashierCommissionPct` | 0 | Pays cashiers a share of each sale. This creates currency, so plan for it |
-| `Demo.SpawnRegister`, `CreateItemTools` | on | Build the demo counter and placeholder Tools if none exist |
 
 ### Products
 
+Each line in `Config.Products` is one item:
+
 ```lua
-{ Id = "gravitycoil", Name = "Gravity Coil", Category = "Gear", Price = 25, TaxRate = 20,
-  Stock = 10, Colour = rgb(120, 80, 220), Tool = "Gravity Coil" },
+{ Id = "gravitycoil", Name = "Gravity Coil", Category = "Gear", Price = 25, Stock = 10,
+  Colour = rgb(120, 80, 220), Tool = "Gravity Coil" },
 ```
 
-`Id` must never change, because sales and stock refer to it. Leave out `Stock` for items that are not stock-tracked. `Tool` is the name of a Tool in `ServerStorage.POSItems`. Put your real modelled items there and RoPOS gives them to the customer.
+| Field | What to put |
+| --- | --- |
+| `Id` | A short unique name with no spaces. **Never change it** once the game is live, because sales and stock refer to it |
+| `Name` | What players see |
+| `Category` | One of the names in `Config.Categories` |
+| `Price` | Whole pounds (£). Roblox money has no pence |
+| `Stock` | How many you have. Leave it out for unlimited |
+| `Colour` | The colour of the item's tile |
+| `Tool` | The Tool the customer receives (see below). Leave it out if they get nothing to hold |
 
-### Your own registers
+Managers can change prices and stock while the game runs (**Products** tab). Those changes are saved and override the numbers in Config.
 
-1. Make a Model (or a single Part) for the till.
-2. Add the tag `POSRegister` (Properties > Tags, or the Tag Editor).
-3. Optional attributes: `RegisterId` (stable ID) and `RegisterName` (for example "Drive-thru").
-4. Optional: a Part named `Screen` inside the model. Its **front** face shows the customer display. Without one, a floating display appears above the register.
+### Give customers the items they buy
 
-Turn off `Config.Demo.SpawnRegister` once you have your own.
+1. In the Explorer, find or create a Folder called **POSItems** inside **ServerStorage**.
+2. Put a **Tool** in it for each product, named exactly like the product's `Tool` setting (for example `Gravity Coil`).
 
-### Reading roles from other scripts
+When a customer pays, RoPOS puts a copy of the Tool in their backpack for every one they bought. Until you add your own Tools, RoPOS makes simple coloured blocks as placeholders.
 
-Every player gets a `POSRole` attribute (`"Customer"`, `"Cashier"` or `"Manager"`), so doors, uniforms and staff-only areas can use the same rules.
+### Money
 
-## Test without Roblox
+Players start with £100 in a saved `Cash` value, shown on the leaderboard. To change this, edit `Config.Currency`:
 
-`tests/simulate.luau` runs the **real** RoPOS server code, every module unchanged, on 2 simulated game servers that share one set of DataStores. Fake players walk up to the counter, ring up orders, pay, decline, get refunds and change servers. 101 checks cover permissions, malformed requests, payments, timeouts, a price changing mid-payment, stock sold on 2 servers at once, a refund to a player who left, 2 managers refunding the same sale at the same moment, reports, rate limiting and a DataStore outage.
+- `StartingBalance`: how much new players get.
+- `Provider = "Leaderstats"`: use money your game already has. Set `StatName` to the name of your leaderstats value (for example `"Coins"`). RoPOS then leaves saving that value to your game.
 
-```sh
-rokit install          # once: installs lune and the other tools from rokit.toml
-lune run tests/simulate
-```
+### Your own till
 
-It ends with `RoPOS simulation: 101 passed, 0 failed`. The fake engine (`tests/sim/Engine.luau`) is stricter than Roblox in one useful way: it fails on anything a RemoteEvent or DataStore would refuse, such as a mixed table or a Color3 saved to a DataStore.
+1. Build a till model, or use a single Part.
+2. Select it. In the **Properties** panel, under **Tags**, add the tag `POSRegister`.
+3. Optional: add a Part named `Screen` inside the model. Its front face becomes the screen customers see. Without one, a floating screen appears above the till.
+4. Optional: in **Attributes**, add `RegisterName` (text, for example `Drive-thru`). With several tills, also add `RegisterId` (text, a different short name for each till).
+5. In Config, set `Config.Demo.SpawnRegister = false` so the demo counter is no longer built.
 
-## Development
+You can have as many tills as you like.
 
-```sh
-rokit install                                   # rojo, selene, stylua, luau-lsp, lune
-lune run tests/simulate                         # end-to-end run of the server code (no Roblox)
-luau tests/run.luau                             # unit tests (Luau CLI)
-selene src tests                                # lint
-stylua --check src tests                        # formatting
-rojo sourcemap -o sourcemap.json
-luau-lsp analyze --definitions=globalTypes.d.luau --sourcemap=sourcemap.json src tests
-rojo build -o RoPOS.rbxlx                       # rebuild the place file after changing code
-rojo serve                                      # live sync into Studio with the Rojo plugin
-```
+## Staff
 
-The same specs also run in the Output window at the start of every Studio play test. `globalTypes.d.luau` comes from the [luau-lsp repository](https://github.com/JohnnyMorganz/luau-lsp/tree/main/scripts).
+| Role | Can |
+| --- | --- |
+| **Customer** | Buy things. Customers don't see the till prompt |
+| **Cashier** | Sell, give discounts up to 10%, open and close shifts, look up receipts |
+| **Manager** | Everything a cashier can, plus refunds, any discount, prices, stock, reports and the audit log |
 
-## Studio acceptance checklist
+**Set your staff before you publish.** In `Config.Staff`, either:
 
-Run this in a **Local Server** test with 2 players (Test > Clients and Servers), and record the result before you release:
+- use your Roblox group: set `GroupId` to your group's ID, then `CashierRank` and `ManagerRank` to the lowest rank number for each role, or
+- list people by user ID: `Users = { [123456789] = "Manager", [987654321] = "Cashier" }`
 
-| # | Step | Expected |
+The owner of the game is always a manager.
+
+Studio makes everyone a manager for testing. To test the real staff rules in Studio, set `Config.Staff.StudioRole = nil`.
+
+## Saving
+
+In a published game, RoPOS saves money, stock, sales, reports and the audit log, and every server of your game shares them.
+
+Studio doesn't save anything until you do both of these:
+
+1. **File > Publish to Roblox**.
+2. **Home > Game Settings > Security**, turn on **Enable Studio Access to API Services**, and press **Save**.
+
+Until then, the POS window shows **Studio: data not saved** and everything resets when you stop testing.
+
+## Using the till
+
+| To | Do this |
+| --- | --- |
+| Start taking payments | **Shift** tab > **Open shift** |
+| Sell | **Sell** tab: tap items, **Choose customer**, **Charge**. The customer presses **Pay** on their screen |
+| Give a discount | Tap a percentage under **Discount** before pressing Charge |
+| Cancel a payment | **Cancel payment** while it's waiting. Payments also cancel after 30 seconds |
+| See takings so far | **Shift** tab > **X report** |
+| End the day | **Shift** tab > **Close shift** shows the Z report |
+| Refund (managers) | **Sales** tab, tap the receipt, **Refund**. Choose whether the items go back into stock |
+| Change prices or stock (managers) | **Products** tab |
+| See the last 7 days (managers) | **Reports** tab |
+| See who did what (managers) | **Audit log** tab |
+| Leave the till | Press **✕**, press Esc, or walk away |
+
+## If something doesn't work
+
+| Problem | Fix |
+| --- | --- |
+| Nothing happens when I hold E | You must be a cashier or manager (see [Staff](#staff)) and within about 2.5 m of the till |
+| "needs to stand at the register" | The customer must be within 16 studs (about 4.5 m) of the till |
+| The POS window closes by itself | The cashier walked more than 20 studs (about 5.6 m) from the till |
+| "You don't have enough Cash" | The customer can't afford it. The cashier presses **Cancel payment**, removes some items and charges again |
+| "Prices or stock changed" | A manager changed a price, or an item sold out, while the customer was deciding. Charge again |
+| Customers don't get items | Check the Tool in **ServerStorage > POSItems** has exactly the same name as the product's `Tool` setting |
+| Data resets between tests | See [Saving](#saving) |
+| Anything else | Open **View > Output**. RoPOS messages start with `[RoPOS]` and say what to fix |
+
+## All settings
+
+| Setting | Default | What it does |
 | --- | --- | --- |
-| 1 | Player 1 holds E on the till | POS window opens on Sell, shift shows "closed" |
-| 2 | Open a shift | Header pill turns green, register screen shows "Welcome!" |
-| 3 | Add 2 Bloxy Colas and 1 Boombox | Totals update, register screen shows "3 items" and the total |
-| 4 | Player 2 stands at the counter, Player 1 chooses them and presses Charge | Player 2 sees the bill with countdown, the screen shows "Please approve" |
-| 5 | Player 2 presses Pay | Both get a receipt, Player 2's Cash goes down, Tools appear in Player 2's backpack, Boombox stock goes down by 1 |
-| 6 | Charge again and Player 2 presses Decline | Player 1 sees "declined", nothing is charged |
-| 7 | Charge again and wait 30 s | Payment expires on both sides |
-| 8 | Sales tab, open the receipt, Refund with restock | Player 2 gets the money back, stock returns, the receipt shows REFUNDED |
-| 9 | Try to refund the same receipt again | Refused |
-| 10 | Shift tab, Close shift | Z report shows 1 sale and 1 refund, net 0 |
-| 11 | Open the till again, then walk more than 20 studs (about 5.6 m) away | Window closes, register screen shows "Closed" |
-| 12 | Reports and Audit log tabs | The sale, refund and shift actions are listed |
+| `Store.Name`, `ReceiptPrefix`, `Footer` | Blox Mart, `BM` | Shown on the screens and receipts |
+| `Currency.Provider` | `"Builtin"` | `"Leaderstats"` uses money your game already creates and saves |
+| `Currency.StatName`, `Symbol`, `StartingBalance` | `Cash`, `£`, 100 | Prices and balances are whole pounds |
+| `Tax.Enabled`, `Name`, `Inclusive` | off, `VAT`, inclusive | Each product's `TaxRate` is a percentage (20 = UK standard rate) |
+| `Staff.GroupId`, `ManagerRank`, `CashierRank` | 0, 250, 10 | Roles from your group's ranks. `Users` sets people by user ID |
+| `Staff.StudioRole` | `"Manager"` | Role for everyone in Studio tests. `nil` uses the real rules |
+| `Discounts.Presets`, `CashierMaxPct` | 0 to 50%, 10% | Discount buttons, and the most a cashier can give |
+| `Checkout.CustomerRange` | 16 studs (about 4.5 m) | How close the customer must stand |
+| `Checkout.OperatorRange` | 20 studs (about 5.6 m) | The cashier is signed out beyond this |
+| `Checkout.PaymentTimeout` | 30 s | Time the customer has to approve |
+| `Checkout.AllowSelfCheckout` | `"Studio"` | Let staff charge themselves (Studio only by default) |
+| `Checkout.GiveItems` | on | Give customers the Tools they buy |
+| `Payouts.CashierCommissionPct` | 0 | Pays cashiers a share of each sale. This adds money to your game's economy |
+| `Inventory.LowStockAt` | 5 | Stock badges turn amber at this level |
+| `Data.Scope` | `"v1"` | Change it (for example to `"v2"`) to start again with empty data |
+| `Demo.SpawnRegister`, `CreateItemTools` | on | Build the demo counter and placeholder Tools when none exist |
+
+Other scripts in your game can check a player's role with `player:GetAttribute("POSRole")`. It returns `"Customer"`, `"Cashier"` or `"Manager"`, so staff doors and uniforms can follow the same rules.
+
+## For developers
+
+How RoPOS works, the test suite (including a run of the real server code without Roblox), the tools and how to publish a release are in [DEVELOPMENT.md](DEVELOPMENT.md).
+
+RoPOS started as the Roblox version of a web POS (pos-system) and keeps its pricing rules and rounding.
