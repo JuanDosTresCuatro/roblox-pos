@@ -367,7 +367,7 @@ end
 check(slowed, "40 rapid requests get 'Slow down'")
 
 step("Walking away signs the cashier out")
-settle(4.2) -- let the 4 s "Thank you!" flash finish
+settle(5.3) -- let the 5 s "Thank you!" flash finish
 check(display(A) == "Closed", "register screen says Closed after the shift", display(A))
 A.engine.moveTo(cass, FAR)
 settle(1.3)
