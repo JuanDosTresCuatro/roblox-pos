@@ -1,6 +1,6 @@
 --!strict
 -- Line pricing shared by the client (live cart preview) and the server (authoritative totals).
--- Port of public/js/pricing.js from the web POS: the same rounding, so both always agree.
+-- Port of the pricing function from the RoPOS web POS: the same rounding, so both always agree.
 -- All money values are whole numbers. Rates are percentages.
 
 export type Line = {

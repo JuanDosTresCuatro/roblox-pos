@@ -4,7 +4,19 @@ A point of sale system for Roblox experiences: shops, cafés, restaurants and an
 
 Staff walk up to a register and ring up an order. The customer approves the payment on their own screen, the money moves, stock goes down, the items appear in their backpack and both players get a receipt. Managers get shift reports, refunds, price and stock control, 7-day reports and an audit log. Everything is saved and shared across every server of the game.
 
-It is the Roblox version of the web POS in the parent folder, and uses the same pricing rules and rounding.
+RoPOS started as the Roblox version of a web POS (pos-system) and keeps its pricing rules and rounding.
+
+## Download
+
+**[Download RoPOS-Studio.zip](https://github.com/JuanDosTresCuatro/roblox-pos/releases/latest/download/RoPOS-Studio.zip)** (latest release). Unzip it and open `READ ME FIRST.txt`. It contains the demo place, the 3 model files to add RoPOS to your own game, and the scripts.
+
+Other downloads on the [Releases page](https://github.com/JuanDosTresCuatro/roblox-pos/releases/latest):
+
+| File | For |
+| --- | --- |
+| `RoPOS-Studio.zip` | Everything for Roblox Studio, with setup steps |
+| `RoPOS.rbxlx` | Just the demo place: open it in Studio and press Play |
+| `RoPOS-Simulator.html` | Try it in a browser, no Roblox needed |
 
 ## Start here
 
@@ -62,6 +74,15 @@ powershell -ExecutionPolicy Bypass -File packaging/package-studio.ps1
 
 It rebuilds `studio/` from the current code and writes `RoPOS-Studio.zip`. Run it again after changing the code.
 
+### Publish a release
+
+Push a version tag and GitHub builds the downloads and publishes the release by itself (see `.github/workflows/release.yml`). It runs the tests first, so a broken version is never released.
+
+```sh
+git tag v1.1.0
+git push origin v1.1.0
+```
+
 ## How a sale works in game
 
 | Who | Does what |
@@ -111,7 +132,7 @@ It rebuilds `studio/` from the current code and writes `RoPOS-Studio.zip`. Run i
 - **Server-authoritative.** The client sends only product IDs and quantities. The server prices every order from its own catalogue and re-prices on approval. If anything changed, the payment is cancelled instead of charging a different amount.
 - **One API, one router.** A single `RemoteFunction` carries every request as an action name (`"sales.refund"`). The router rate-limits each player, checks the role the action needs, runs it in a `pcall` and returns `{ ok, data }` or `{ ok = false, error }`. Internal errors are logged and never sent to the client.
 - **The server never calls `InvokeClient`.** Server-to-client traffic goes through one `RemoteEvent`, so a client cannot hang a server thread.
-- **Shared pricing.** `Pricing.luau` runs on both sides, so the cart preview always matches the charge. It is a port of `public/js/pricing.js`, and the test suite runs the same cases as the web POS tests.
+- **Shared pricing.** `Pricing.luau` runs on both sides, so the cart preview always matches the charge. It is a port of the web POS pricing function, and the test suite runs the same cases as the web POS tests.
 
 ### Data and multiple servers
 

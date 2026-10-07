@@ -1,0 +1,45 @@
+name: Release
+
+# Push a tag such as v1.0.0 to publish a release with the downloads attached.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools (versions match rokit.toml)
+        run: |
+          mkdir -p "$HOME/bin" && cd "$(mktemp -d)"
+          fetch() { curl -sSfL -o tool.zip "$1" && unzip -oq tool.zip -d "$HOME/bin" && rm tool.zip; }
+          fetch https://github.com/luau-lang/luau/releases/download/0.741/luau-ubuntu.zip
+          fetch https://github.com/lune-org/lune/releases/download/v0.10.5/lune-0.10.5-linux-x86_64.zip
+          fetch https://github.com/rojo-rbx/rojo/releases/download/v7.7.1/rojo-7.7.1-linux-x86_64.zip
+          chmod +x "$HOME/bin"/*
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Test before releasing
+        run: |
+          luau tests/run.luau
+          lune run tests/simulate
+
+      - name: Build the Studio package
+        shell: pwsh
+        run: ./packaging/package-studio.ps1
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp studio/RoPOS.rbxlx "$RUNNER_TEMP/RoPOS.rbxlx"
+          cp simulator/index.html "$RUNNER_TEMP/RoPOS-Simulator.html"
+          gh release create "$GITHUB_REF_NAME" \
+            RoPOS-Studio.zip "$RUNNER_TEMP/RoPOS.rbxlx" "$RUNNER_TEMP/RoPOS-Simulator.html" \
+            --title "RoPOS $GITHUB_REF_NAME" \
+            --notes-file packaging/RELEASE_NOTES.md

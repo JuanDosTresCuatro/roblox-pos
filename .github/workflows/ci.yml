@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools (versions match rokit.toml)
+        run: |
+          mkdir -p "$HOME/bin" && cd "$(mktemp -d)"
+          fetch() { curl -sSfL -o tool.zip "$1" && unzip -oq tool.zip -d "$HOME/bin" && rm tool.zip; }
+          fetch https://github.com/luau-lang/luau/releases/download/0.741/luau-ubuntu.zip
+          fetch https://github.com/lune-org/lune/releases/download/v0.10.5/lune-0.10.5-linux-x86_64.zip
+          fetch https://github.com/Kampfkarren/selene/releases/download/0.32.0/selene-0.32.0-linux.zip
+          fetch https://github.com/JohnnyMorganz/StyLua/releases/download/v2.5.2/stylua-linux-x86_64.zip
+          fetch https://github.com/rojo-rbx/rojo/releases/download/v7.7.1/rojo-7.7.1-linux-x86_64.zip
+          chmod +x "$HOME/bin"/*
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Unit tests
+        run: luau tests/run.luau
+
+      - name: End-to-end simulation of the server code
+        run: lune run tests/simulate
+
+      - name: Lint
+        run: |
+          selene generate-roblox-std
+          selene src tests
+
+      - name: Formatting
+        run: stylua --check src tests
+
+      - name: Build the place and the Studio models
+        run: |
+          rojo build default.project.json -o "$RUNNER_TEMP/RoPOS.rbxlx"
+          for part in shared server client; do
+            rojo build "packaging/$part.project.json" -o "$RUNNER_TEMP/$part.rbxmx"
+          done

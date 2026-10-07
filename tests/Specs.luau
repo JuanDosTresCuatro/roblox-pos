@@ -5,7 +5,7 @@ return function(kit, M)
 	local describe, it, expect = kit.describe, kit.it, kit.expect
 	local Pricing, Validate, Aggregate, Format = M.Pricing, M.Validate, M.Aggregate, M.Format
 
-	-- The same cases as test/pricing.test.js in the web POS: both must give identical totals.
+	-- The same cases as the web POS pricing tests: both must give identical totals.
 	describe("Pricing", function()
 		it("tax-inclusive prices extract tax from the gross", function()
 			local r = Pricing.priceLines(
